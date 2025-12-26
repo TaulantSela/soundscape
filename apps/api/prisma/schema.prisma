@@ -59,6 +59,7 @@ model Mix {
   ownerId   String?
   owner     User?      @relation(fields: [ownerId], references: [id])
   sounds    MixSound[]
+  masterVolume Float   @default(1)
   createdAt DateTime   @default(now())
 }
 
