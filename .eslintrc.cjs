@@ -25,6 +25,11 @@ module.exports = {
       node: true
     }
   },
+  rules: {
+    "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+    "import/no-named-as-default": "off",
+    "import/no-named-as-default-member": "off"
+  },
   ignorePatterns: [
     "node_modules/",
     "dist/",

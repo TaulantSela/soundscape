@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  passwordHash    String
+  displayName     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  presets         Preset[]
+  mixes           Mix[]
+  resetTokens     PasswordResetToken[]
+}
+
+model Sound {
+  id          String  @id
+  name        String
+  category    String
+  fileUrl     String
+  defaultGain Float   @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  presets     PresetSound[]
+  mixes       MixSound[]
+}
+
+model Preset {
+  id        String        @id @default(uuid())
+  name      String
+  emoji     String?
+  color     String?
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  sounds    PresetSound[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model PresetSound {
+  presetId String
+  soundId  String
+  volume   Float
+  preset   Preset @relation(fields: [presetId], references: [id])
+  sound    Sound  @relation(fields: [soundId], references: [id])
+
+  @@id([presetId, soundId])
+}
+
+model Mix {
+  id        String     @id @default(uuid())
+  name      String?
+  ownerId   String?
+  owner     User?      @relation(fields: [ownerId], references: [id])
+  sounds    MixSound[]
+  createdAt DateTime   @default(now())
+}
+
+model MixSound {
+  mixId   String
+  soundId String
+  volume  Float
+  mix     Mix   @relation(fields: [mixId], references: [id])
+  sound   Sound @relation(fields: [soundId], references: [id])
+
+  @@id([mixId, soundId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
