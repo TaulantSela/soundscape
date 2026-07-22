@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Soundscape">
+  <defs>
+    <linearGradient id="ss" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#0b1020"/>
+  <g fill="url(#ss)">
+    <rect x="104" y="196" width="48" height="120" rx="24"/>
+    <rect x="168" y="140" width="48" height="232" rx="24"/>
+    <rect x="232" y="96" width="48" height="320" rx="24"/>
+    <rect x="296" y="156" width="48" height="200" rx="24"/>
+    <rect x="360" y="184" width="48" height="144" rx="24"/>
+  </g>
+</svg>
