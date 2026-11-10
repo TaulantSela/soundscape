@@ -1,40 +1,27 @@
 # @soundscape/desktop
 
-Electron shell that wraps the Soundscape Mixer web experience, adds a persistent tray icon, and exposes global play/pause controls.
+Electron shell that wraps the Soundscape Mixer web app and adds a tray icon with play/pause controls.
 
-## Environment
+## What it loads
 
-Create a `.env` alongside the Electron workspace or export shell variables:
+- Development (`npm run dev`): `SOUNDSCAPE_DEV_SERVER`, default `http://localhost:3000`. Start the web app first.
+- Packaged app: `SOUNDSCAPE_APP_URL` if set, otherwise the production web app (`PRODUCTION_APP_URL` in `@soundscape/config`).
 
-```
-SOUNDSCAPE_ENV=development
-SOUNDSCAPE_APP_URL=http://localhost:3000
-SOUNDSCAPE_API_URL=http://localhost:4000/api
-SOUNDSCAPE_ASSET_URL=http://localhost:3000
-SOUNDSCAPE_DEV_SERVER=http://localhost:3000
-```
-
-The `SOUNDSCAPE_DEV_SERVER` value determines which URL is loaded while the app is not packaged. In production builds the preload bridge uses `SOUNDSCAPE_APP_URL`.
+The window only ever shows that origin: links and navigation elsewhere open in the default browser, and only `http(s)` links are opened at all.
 
 ## Commands
 
 ```bash
-# Launch Electron with automatic restarts
-npm run dev --workspace @soundscape/desktop
-
-# Compile TypeScript to dist/
-npm run build --workspace @soundscape/desktop
-
-# Run linting
+npm run dev --workspace @soundscape/desktop     # compile, then open Electron against the dev server
+npm run build --workspace @soundscape/desktop   # compile TypeScript to dist/
+npm run dist --workspace @soundscape/desktop    # package installers into release/ with electron-builder
 npm run lint --workspace @soundscape/desktop
 ```
 
-## Tray Controls
+Packaging is unsigned unless signing credentials are configured (see the electron-builder docs). If you launch Electron from a process that sets `ELECTRON_RUN_AS_NODE=1` (some editor extension hosts do), unset it first, or Electron starts as plain Node.
 
-The tray menu exposes:
+## Tray controls
 
-- Show Mixer / Hide Mixer – toggles window visibility
-- Toggle Play/Pause – sends a `soundscape:toggle-play` event to the renderer
-- Quit – exits the Electron process
-
-Renderer code can listen for the preload bridge in `window.soundscapeDesktop` to respond to play/pause requests or trigger them manually.
+- Show Mixer / Hide Mixer
+- Toggle Play/Pause: sends `soundscape:toggle-play` to the page, which the web app handles through `window.soundscapeDesktop`
+- Quit

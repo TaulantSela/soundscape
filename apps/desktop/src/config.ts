@@ -1,24 +1,11 @@
-import { createConfig, environmentNameSchema } from '@soundscape/config';
+import { app } from 'electron';
+import { createConfig, environmentNameSchema, parseFeatureFlags } from '@soundscape/config';
 
-const environment = (() => {
-  const candidate = process.env.SOUNDSCAPE_ENV ?? process.env.NODE_ENV ?? 'development';
-  const result = environmentNameSchema.safeParse(candidate);
-  return result.success ? result.data : 'development';
-})();
-
-function parseFeatureFlags(payload: string | undefined) {
-  if (!payload) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(payload) as Record<string, unknown>;
-    return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, Boolean(value)]));
-  } catch (error) {
-    console.warn('Failed to parse feature flags', error);
-    return {};
-  }
-}
+// Packaged apps get no environment variables from a shell, so the packaged
+// build is production by definition.
+const environment = app.isPackaged
+  ? 'production'
+  : environmentNameSchema.safeParse(process.env.SOUNDSCAPE_ENV ?? process.env.NODE_ENV).data ?? 'development';
 
 export const appConfig = createConfig({
   environment,
