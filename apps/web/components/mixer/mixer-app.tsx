@@ -1,86 +1,82 @@
 'use client';
 
-import { useCallback, useEffect, useMemo } from 'react';
-import type {
-  PresetDefinition,
-  PresetSoundSetting,
-  SoundDefinition
+import { useCallback } from 'react';
+import {
+  buildSharedMixPath,
+  hasActiveSounds,
+  type PresetDefinition,
+  type SharedMix,
+  type SoundDefinition
 } from '@soundscape/audio-library';
-import { buildAppUrl } from '@soundscape/config';
 import { toast } from 'sonner';
 import { useMixerStore } from '@/store/mixer-store';
-import { useMixerHydration } from '@/hooks/use-mixer-hydration';
+import { useMixerSession } from '@/hooks/use-mixer-session';
 import { useMixerShortcuts } from '@/hooks/use-mixer-shortcuts';
 import { useAudioEngine } from '@/hooks/use-audio-engine';
+import { useDesktopBridge } from '@/hooks/use-desktop-bridge';
 import { SoundGrid } from '@/components/mixer/sound-grid';
 import { TransportBar } from '@/components/mixer/transport-bar';
 import { PresetPanel } from '@/components/mixer/preset-panel';
 import { ShareMixButton } from '@/components/mixer/share-button';
-import { appConfig } from '@/lib/config';
-import { apiClient } from '@/lib/api-client';
 import { MixBanner } from '@/components/mixer/mix-banner';
+import { getShareOrigin } from '@/lib/config';
+import { shareLink } from '@/lib/share-link';
 
 interface MixerAppProps {
   sounds: SoundDefinition[];
   presets: PresetDefinition[];
-  banner?: {
-    title: string;
-    description?: string;
-    showSave?: boolean;
-    onSave?: () => void;
-  };
-  initialMix?: {
-    sounds: PresetSoundSetting[];
-    masterVolume: number;
-  };
+  /** A mix opened from a share link. */
+  sharedMix?: SharedMix;
 }
 
-export function MixerApp({ sounds, presets, banner, initialMix }: MixerAppProps) {
-  useMixerHydration(sounds, presets);
-  useMixerShortcuts(sounds);
-  const { resume } = useAudioEngine(sounds);
+export function MixerApp({ sounds, presets, sharedMix }: MixerAppProps) {
+  useMixerSession(sounds, presets, sharedMix);
+  const engine = useAudioEngine(sounds);
+  const unlock = useCallback(() => engine.unlock(), [engine]);
+  useMixerShortcuts(sounds, unlock);
 
   const mix = useMixerStore((state) => state.mix);
   const hydrated = useMixerStore((state) => state.hydrated);
+  const mode = useMixerStore((state) => state.mode);
+  const activePresetId = useMixerStore((state) => state.activePresetId);
   const toggleSound = useMixerStore((state) => state.toggleSound);
   const setSoundVolume = useMixerStore((state) => state.setSoundVolume);
   const setMasterVolume = useMixerStore((state) => state.setMasterVolume);
   const setPlaying = useMixerStore((state) => state.setPlaying);
+  const togglePlaying = useMixerStore((state) => state.togglePlaying);
   const applyPreset = useMixerStore((state) => state.applyPreset);
-  const activePresetId = useMixerStore((state) => state.activePresetId);
+  const keepSharedMix = useMixerStore((state) => state.keepSharedMix);
   const serialize = useMixerStore((state) => state.serialize);
-  const loadMixState = useMixerStore((state) => state.loadMix);
 
-  const volumes = useMemo(() => mix.gains, [mix.gains]);
+  const handleDesktopToggle = useCallback(() => {
+    unlock();
+    togglePlaying();
+  }, [togglePlaying, unlock]);
+  useDesktopBridge(handleDesktopToggle);
 
-  useEffect(() => {
-    if (!hydrated || !initialMix) {
-      return;
-    }
-    loadMixState(initialMix);
-  }, [hydrated, initialMix, loadMixState]);
-
-  const handleTogglePlay = useCallback(async () => {
-    if (!mix.isPlaying) {
-      await resume();
-    }
+  const handleTogglePlay = useCallback(() => {
+    unlock();
     setPlaying(!mix.isPlaying);
-  }, [mix.isPlaying, resume, setPlaying]);
+  }, [mix.isPlaying, setPlaying, unlock]);
 
   const handleShare = useCallback(async () => {
-    try {
-      const payload = {
-        sounds: serialize(),
-        masterVolume: mix.masterVolume
-      };
-      const response = await apiClient.createMix(payload);
-      const url = buildAppUrl(appConfig, `/mix/${response.id}`);
-      await navigator.clipboard.writeText(url);
+    const soundsToShare = serialize();
+    if (soundsToShare.length === 0) {
+      return;
+    }
+    const url = `${getShareOrigin()}${buildSharedMixPath({ sounds: soundsToShare, masterVolume: mix.masterVolume })}`;
+    const outcome = await shareLink(url, 'My Soundscape mix');
+    if (outcome === 'copied') {
       toast.success('Shareable link copied to clipboard');
-    } catch (error) {
-      toast.error((error as Error).message ?? 'Unable to share mix right now');
     }
   }, [mix.masterVolume, serialize]);
+
+  const handleKeepSharedMix = useCallback(() => {
+    keepSharedMix();
+    // The mix is now the visitor's own, so the address should be the mixer's.
+    window.history.replaceState(null, '', '/');
+    toast.success('Saved. This is now your mix.');
+  }, [keepSharedMix]);
 
   if (!hydrated) {
     return (
@@ -90,16 +86,16 @@ export function MixerApp({ sounds, presets, banner, initialMix }: MixerAppProps)
     );
   }
 
-  const canShare = serialize().length > 0;
+  const hasSounds = hasActiveSounds(mix);
 
   return (
     <div className="space-y-6 pb-32">
-      {banner ? (
+      {mode === 'shared' ? (
         <MixBanner
-          title={banner.title}
-          description={banner.description}
-          showSave={banner.showSave}
-          onSave={banner.onSave}
+          title={sharedMix?.name ? `You're listening to "${sharedMix.name}"` : "You're listening to a shared mix"}
+          description="Press play to listen, tweak the layers, or keep it as your own mix."
+          actionLabel="Keep this mix"
+          onAction={handleKeepSharedMix}
         />
       ) : null}
 
@@ -117,25 +113,36 @@ export function MixerApp({ sounds, presets, banner, initialMix }: MixerAppProps)
           </header>
           <SoundGrid
             sounds={sounds}
-            volumes={volumes}
+            volumes={mix.gains}
             onToggle={(id) => {
-              void resume();
+              unlock();
               toggleSound(id);
             }}
-            onVolumeChange={(id, volume) => setSoundVolume(id, volume)}
+            onVolumeChange={(id, volume) => {
+              unlock();
+              setSoundVolume(id, volume);
+            }}
           />
         </section>
 
-        <PresetPanel presets={presets} activePresetId={activePresetId} onApply={applyPreset} />
+        <PresetPanel
+          presets={presets}
+          activePresetId={activePresetId}
+          onApply={(presetId) => {
+            unlock();
+            applyPreset(presetId);
+          }}
+        />
       </div>
 
       <TransportBar
         isPlaying={mix.isPlaying}
+        canPlay={hasSounds}
         masterVolume={mix.masterVolume}
         onTogglePlay={handleTogglePlay}
         onMasterVolumeChange={setMasterVolume}
       >
-        <ShareMixButton onShare={handleShare} disabled={!canShare} />
+        <ShareMixButton onShare={handleShare} disabled={!hasSounds} />
       </TransportBar>
     </div>
   );

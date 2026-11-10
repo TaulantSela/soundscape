@@ -6,8 +6,8 @@
       "DOM.Iterable",
       "ES2021"
     ],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "jsx": "preserve",
     "allowJs": true,
     "resolveJsonModule": true,
@@ -25,6 +25,9 @@
       ],
       "@/store/*": [
         "./store/*"
+      ],
+      "@/workers/*": [
+        "./workers/*"
       ]
     },
     "noEmit": true,
