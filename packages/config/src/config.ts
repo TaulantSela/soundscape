@@ -1,7 +1,10 @@
 import { appConfigSchema, type AppConfig } from './schema';
 
-const DEFAULT_API_BASE_URL = 'http://localhost:4000/api';
-const DEFAULT_APP_URL = 'http://localhost:3000';
+/** The deployed web app. Used when no app URL is configured outside development. */
+export const PRODUCTION_APP_URL = 'https://soundscape-web-one.vercel.app';
+
+const DEVELOPMENT_APP_URL = 'http://localhost:3000';
+const DEVELOPMENT_API_BASE_URL = 'http://localhost:4000/api';
 
 export interface CreateConfigOptions {
   environment?: AppConfig['environment'];
@@ -16,14 +19,25 @@ export interface CreateConfigOptions {
   featureFlags?: AppConfig['featureFlags'];
 }
 
+/** Treat unset and blank values alike, so `FOO=` in an env file means "not set". */
+export function optionalString(value: string | undefined | null) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export function createConfig(options: CreateConfigOptions = {}): AppConfig {
+  const environment = options.environment ?? 'development';
+  const isDevelopment = environment === 'development' || environment === 'test';
+
   const configCandidate: AppConfig = {
-    environment: options.environment ?? 'development',
+    environment,
     runtime: options.runtime ?? 'server',
-    appUrl: options.appUrl ?? DEFAULT_APP_URL,
-    apiBaseUrl: options.apiBaseUrl ?? DEFAULT_API_BASE_URL,
-    assetBaseUrl: options.assetBaseUrl ?? options.appUrl ?? DEFAULT_APP_URL,
-    cdnBucketUrl: options.cdnBucketUrl,
+    // Never fall back to localhost outside development: a production build
+    // that silently points at localhost looks fine but cannot work.
+    appUrl: optionalString(options.appUrl) ?? (isDevelopment ? DEVELOPMENT_APP_URL : PRODUCTION_APP_URL),
+    apiBaseUrl: optionalString(options.apiBaseUrl) ?? (isDevelopment ? DEVELOPMENT_API_BASE_URL : undefined),
+    assetBaseUrl: optionalString(options.assetBaseUrl),
+    cdnBucketUrl: optionalString(options.cdnBucketUrl),
     build: {
       revision: options.build?.revision,
       timestamp: options.build?.timestamp
@@ -46,10 +60,10 @@ export function mergeConfig(base: AppConfig, overrides: CreateConfigOptions = {}
   return createConfig({
     environment: overrides.environment ?? base.environment,
     runtime: overrides.runtime ?? base.runtime,
-    appUrl: overrides.appUrl ?? base.appUrl,
-    apiBaseUrl: overrides.apiBaseUrl ?? base.apiBaseUrl,
-    assetBaseUrl: overrides.assetBaseUrl ?? base.assetBaseUrl,
-    cdnBucketUrl: overrides.cdnBucketUrl ?? base.cdnBucketUrl,
+    appUrl: optionalString(overrides.appUrl) ?? base.appUrl,
+    apiBaseUrl: optionalString(overrides.apiBaseUrl) ?? base.apiBaseUrl,
+    assetBaseUrl: optionalString(overrides.assetBaseUrl) ?? base.assetBaseUrl,
+    cdnBucketUrl: optionalString(overrides.cdnBucketUrl) ?? base.cdnBucketUrl,
     build: {
       revision: overrides.build?.revision ?? base.build.revision,
       timestamp: overrides.build?.timestamp ?? base.build.timestamp
@@ -65,4 +79,24 @@ export function mergeConfig(base: AppConfig, overrides: CreateConfigOptions = {}
     },
     featureFlags: overrides.featureFlags ?? base.featureFlags
   });
+}
+
+/** Parse a JSON object of feature flags; anything malformed yields no flags. */
+export function parseFeatureFlags(raw: unknown): Record<string, boolean> {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return {};
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return Object.fromEntries(
+        Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [key, Boolean(value)])
+      );
+    }
+  } catch (error) {
+    console.warn('Failed to parse feature flags JSON value', error);
+  }
+
+  return {};
 }

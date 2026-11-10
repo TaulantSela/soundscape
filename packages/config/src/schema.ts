@@ -9,10 +9,12 @@ export type RuntimeTarget = z.infer<typeof runtimeTargetSchema>;
 export const appConfigSchema = z.object({
   environment: environmentNameSchema.default('development'),
   runtime: runtimeTargetSchema.default('server'),
-  appUrl: z.string().url().optional(),
-  apiBaseUrl: z.string().url(),
-  assetBaseUrl: z.string().url().optional(),
-  cdnBucketUrl: z.string().url().optional(),
+  /** Public web app origin, used for share links and the desktop shell. */
+  appUrl: z.url().optional(),
+  /** REST API base. Only set in development or when an API is deployed. */
+  apiBaseUrl: z.url().optional(),
+  assetBaseUrl: z.url().optional(),
+  cdnBucketUrl: z.url().optional(),
   build: z
     .object({
       revision: z.string().optional(),
@@ -31,7 +33,7 @@ export const appConfigSchema = z.object({
       refreshIntervalMinutes: z.number().int().positive().default(15)
     })
     .default({ storageKey: 'soundscape.auth', refreshIntervalMinutes: 15 }),
-  featureFlags: z.record(z.boolean()).default({})
+  featureFlags: z.record(z.string(), z.boolean()).default({})
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;

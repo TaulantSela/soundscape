@@ -23,6 +23,8 @@ export function SoundCard({ sound, volume, isActive, onToggle, onVolumeChange }:
       <button
         type="button"
         onClick={onToggle}
+        aria-pressed={isActive}
+        aria-label={`${isActive ? 'Turn off' : 'Turn on'} ${sound.name}`}
         className={cn(
           'flex flex-1 flex-col items-start gap-2 text-left transition-transform duration-200 ease-glide',
           isActive ? 'scale-[1.02]' : 'opacity-90 group-hover:opacity-100'

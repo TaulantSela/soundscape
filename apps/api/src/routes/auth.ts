@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 
 export const authRouter = Router();
 
-const authLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: 'draft-7' });
+const authLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false });
 
 authRouter.use(authLimiter);
 

@@ -6,6 +6,8 @@ import { formatPercent } from '@/lib/utils';
 
 interface TransportBarProps {
   isPlaying: boolean;
+  /** False when no sound is switched on, so there is nothing to play. */
+  canPlay?: boolean;
   masterVolume: number;
   onTogglePlay: () => void;
   onMasterVolumeChange: (volume: number) => void;
@@ -14,6 +16,7 @@ interface TransportBarProps {
 
 export function TransportBar({
   isPlaying,
+  canPlay = true,
   masterVolume,
   onTogglePlay,
   onMasterVolumeChange,
@@ -23,7 +26,12 @@ export function TransportBar({
     <div className="sticky bottom-4 z-40 rounded-3xl border border-surfaceRaised bg-surface/90 p-4 backdrop-blur">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <Button onClick={onTogglePlay} size="md">
+          <Button
+            onClick={onTogglePlay}
+            size="md"
+            disabled={!isPlaying && !canPlay}
+            title={!isPlaying && !canPlay ? 'Switch on a sound first' : undefined}
+          >
             {isPlaying ? 'Pause' : 'Play'}
           </Button>
           {children ? <div className="flex items-center gap-2">{children}</div> : null}

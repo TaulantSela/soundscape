@@ -1,37 +1,35 @@
 # @soundscape/mobile
 
-Expo-managed React Native app that mirrors the Soundscape Mixer experience on iOS and Android. It shares presets and audio metadata with the web client and persists the mixer state locally with AsyncStorage.
+Expo SDK 54 (React Native 0.81) app that mirrors the Soundscape Mixer on iOS and Android, using the same sounds, presets and share links as the web app.
 
 ## Environment
 
-Set Expo runtime variables (in `app.config.ts` or via the Expo CLI) before starting the app:
+All optional; set them in your shell or an `.env` file before starting Expo:
 
 ```
 EXPO_PUBLIC_ENV=development
-EXPO_PUBLIC_APP_URL=http://localhost:3000
-EXPO_PUBLIC_API_URL=http://localhost:4000/api
-EXPO_PUBLIC_ASSET_URL=http://localhost:3000
+# Web app origin used in share links. Defaults to the production web app.
+EXPO_PUBLIC_APP_URL=https://soundscape-web-one.vercel.app
+# Only needed if a sound has a recorded `file`.
+EXPO_PUBLIC_ASSET_URL=https://cdn.example.com
 ```
 
 ## Commands
 
 ```bash
-# Start the Expo dev server
-npm run start --workspace @soundscape/mobile
-
-# Run TypeScript checks
+npm run start --workspace @soundscape/mobile      # Expo dev server
+npm run ios --workspace @soundscape/mobile        # build and run on iOS
+npm run android --workspace @soundscape/mobile    # build and run on Android
 npm run typecheck --workspace @soundscape/mobile
-
-# Lint the source
 npm run lint --workspace @soundscape/mobile
 ```
 
-## Capabilities
+The app uses native modules (`expo-audio`, `expo-file-system`), so use a development build (`expo run:*`) rather than Expo Go.
 
-- Sound toggle and volume controls powered by shared audio helpers
-- Master volume slider and preset chips
-- Mix persistence via AsyncStorage
-- Share flow that calls the API, then opens the native share sheet with a generated URL
-- Audio playback handled by `expo-av`; assets are resolved through the shared config helper `buildAssetUrl`
+## How it works
 
-When pointing to a production API, ensure the asset base URL exposes static audio files so the player can stream loops.
+- Each sound is synthesized the first time it is switched on and cached as a WAV file in the app's cache directory (`src/sound-files.ts`); later plays start instantly.
+- `src/audio-engine.ts` keeps one looping `expo-audio` player per active sound. Player properties are set synchronously, so fast slider moves can't race each other, and the master volume scales every layer.
+- Playback continues with the screen locked (`UIBackgroundModes: audio` on iOS; on Android one layer runs the media playback service). Pausing or resuming from the lock screen or headphones pauses or resumes the whole mix.
+- The mix is saved to AsyncStorage (debounced); playback always starts stopped.
+- Share builds a self-contained web link and opens the native share sheet.

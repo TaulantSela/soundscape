@@ -1,88 +1,64 @@
 # Soundscape Mixer
 
-Soundscape Mixer is a cross-platform ambient audio tool that lets listeners blend curated layers into a shareable mix. The monorepo hosts the Express API, a Next.js web client, an Expo mobile app, and an Electron desktop shell that all share the same domain packages for sound metadata and configuration.
+Soundscape Mixer is a cross-platform ambient audio tool that lets listeners blend layers (rain, waves, café murmur, brown noise and more) into a mix they can share with a link. The monorepo holds a Next.js web app, an Expo mobile app, an Electron desktop shell, an optional Express API, and the shared packages they all use.
 
-## Workspace Layout
+## Workspace layout
 
-- `apps/api` – Express + Prisma REST API
-- `apps/web` – Next.js 14 web experience with typed routes
-- `apps/mobile` – Expo/React Native client with offline persistence
-- `apps/desktop` – Electron shell that wraps the web UI and exposes tray controls
-- `packages/audio-library` – Shared sound definitions, presets, and mix helpers
-- `packages/config` – Environment-aware configuration helpers used by every target
+- `packages/audio-library` – sound and preset definitions, mix helpers, share-link encoding, and the synthesizer that renders every sound
+- `packages/config` – environment-aware configuration helpers used by every target
+- `apps/web` – Next.js 15 web app (the main product)
+- `apps/mobile` – Expo SDK 54 / React Native app
+- `apps/desktop` – Electron shell around the web app, with tray controls
+- `apps/api` – Express + Prisma REST API (optional; no client depends on it today)
+
+## How sounds work
+
+None of the sounds ship as audio files. Each one is synthesized from code in `packages/audio-library/src/synth`, rendered as a seamless loop (continuous textures are crossfaded at the loop point; discrete events wrap around it) and level-matched. The web app renders loops in a Web Worker and plays them with Web Audio; the mobile app renders each loop once and caches it as a WAV file.
+
+To use a recording instead, add `file: { path: '/audio/<id>.mp3', format: 'mp3' }` to the sound in `packages/audio-library/src/sounds.ts` and serve the file from `apps/web/public/audio/` (or a CDN via `NEXT_PUBLIC_ASSET_URL`). Make sure you hold the rights to any recording you add.
+
+## Sharing mixes
+
+A shared mix travels inside the link, so sharing needs no server or database:
+
+```
+/mix?s=rain-shower:60,brown-noise:35&v=80
+```
+
+`s` lists `soundId:volumePercent` pairs and `v` is the master volume. Opening a link never overwrites the listener's own saved mix unless they choose **Keep this mix**. See `packages/audio-library/src/share.ts`.
 
 ## Prerequisites
 
-- Node.js 18.18 or newer and npm 9+
-- PostgreSQL for the API workspace (development can use a local instance)
-- Expo CLI (optional) for running the mobile app on devices or emulators
-- Xcode or Android Studio for native simulators, if desired
+- Node.js 22.12 or newer and npm 10+
+- For the API only: PostgreSQL
+- For mobile builds: Xcode and/or Android Studio (the app uses native modules, so build it with `expo run:ios` / `expo run:android`)
 
-Install all dependencies in one pass:
+Install all dependencies from the repository root:
 
 ```bash
 npm install
 ```
 
-## Common Scripts
+## Scripts
 
-The root `package.json` exposes convenience commands that fan out to each workspace:
+Run these from the repository root:
 
-- `npm run dev` – Start all available dev servers (Next.js, Express, Expo, Electron)
-- `npm run build` – Type-check and build every package
-- `npm run lint` – Run linting across workspaces
-- `npm run test` – Execute workspace tests (Vitest for the API at present)
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Build the shared packages, then start the web app on http://localhost:3000 |
+| `npm run dev:mobile` | Build the shared packages, then start Expo |
+| `npm run dev:desktop` | Build the shared packages, then open the desktop shell (expects the web app running) |
+| `npm run dev:api` | Build the shared packages, then start the API (needs the API's `.env`) |
+| `npm run build` | Build every workspace, shared packages first |
+| `npm run test` | Run the unit tests (shared packages and API) |
+| `npm run typecheck` | Type-check every workspace |
+| `npm run lint` | Lint every workspace |
 
-Each workspace also publishes its own script set. Examples:
-
-```bash
-# API tests
-npm run test --workspace @soundscape/api
-
-# Next.js development server
-npm run dev --workspace @soundscape/web
-
-# Expo mobile app
-npm run start --workspace @soundscape/mobile
-
-# Electron desktop shell (after building web app)
-npm run dev --workspace @soundscape/desktop
-```
-
-## Developing Locally
-
-1. Configure environment variables for every workspace (see individual READMEs for required keys). The API expects `DATABASE_URL`, JWT secrets, and optional SMTP settings. The clients use `NEXT_PUBLIC_*`, `EXPO_PUBLIC_*`, or `SOUNDSCAPE_*` variables depending on target.
-2. Push the Prisma schema to your development database and seed sounds if necessary:
-   ```bash
-   npm run db:push --workspace @soundscape/api
-   npm run db:generate --workspace @soundscape/api
-   ```
-3. Start the API and the web client:
-   ```bash
-   npm run dev --workspace @soundscape/api
-   npm run dev --workspace @soundscape/web
-   ```
-4. (Optional) Launch the mobile and desktop shells:
-   ```bash
-   npm run start --workspace @soundscape/mobile
-   npm run dev --workspace @soundscape/desktop
-   ```
+Each workspace README lists its own scripts and environment variables.
 
 ## Testing
 
-The API uses Vitest with Supertest and Prisma mocked out for fast endpoint verification:
-
-```bash
-npm run test --workspace @soundscape/api
-```
-
-Additional workspaces currently rely on TypeScript checks and linting. Add Jest or Playwright tests as you expand UI behaviour.
-
-## Sharing Mixes
-
-- The web and mobile clients call `POST /api/mixes` with serialized layers and master volume.
-- The API validates payloads against the shared audio library, persists the mix, and returns a stable identifier.
-- Clients build shareable URLs with `buildAppUrl` from the config package.
+Vitest covers the shared packages (mix logic, share links, synthesizer output and loop seams, config) and the API (Supertest, with Prisma mocked).
 
 ## License
 

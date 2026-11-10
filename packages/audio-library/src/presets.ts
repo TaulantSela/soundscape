@@ -1,4 +1,5 @@
 import { presetDefinitionSchema, type PresetDefinition, type PresetSoundSetting } from './types';
+import { clampVolume } from './volume';
 
 const presetSource: PresetDefinition[] = [
   {
@@ -114,17 +115,4 @@ export function normalizePresetMix(mix: PresetSoundSetting[]) {
 
 export function validatePreset(input: unknown) {
   return presetDefinitionSchema.safeParse(input);
-}
-
-function clampVolume(volume: number) {
-  if (!Number.isFinite(volume)) {
-    return 0;
-  }
-  if (volume <= 0) {
-    return 0;
-  }
-  if (volume >= 1) {
-    return 1;
-  }
-  return volume;
 }

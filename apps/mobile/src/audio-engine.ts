@@ -1,96 +1,201 @@
-import { useEffect, useRef } from 'react';
-import { Audio } from 'expo-av';
-import { buildAssetUrl } from '@soundscape/config';
 import type { MixState, SoundDefinition } from '@soundscape/audio-library';
-import { appConfig } from './config';
+import {
+  createAudioPlayer,
+  setAudioModeAsync,
+  type AudioPlayer,
+  type AudioStatus,
+} from 'expo-audio';
+import { useEffect, useRef, useState } from 'react';
 
-export function useAudioEngine(sounds: SoundDefinition[], mix: MixState) {
-  const soundRefs = useRef(new Map<string, Audio.Sound>());
-  const previousGains = useRef<Record<string, number>>({});
+import { resolveSoundUri } from './sound-files';
 
-  useEffect(() => {
-    void Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      staysActiveInBackground: false,
-      playsInSilentModeIOS: true,
-      shouldDuckAndroid: false
-    });
-  }, []);
+type EngineState = Pick<MixState, 'gains' | 'masterVolume' | 'isPlaying'>;
 
-  useEffect(() => {
-    let isCancelled = false;
+interface EngineCallbacks {
+  /** Playback was paused or resumed from outside the app (lock screen, headphones). */
+  onExternalPlayingChange: (isPlaying: boolean) => void;
+}
 
-    const sync = async () => {
-      for (const sound of sounds) {
-        const currentGain = mix.gains[sound.id] ?? 0;
-        const previousGain = previousGains.current[sound.id] ?? 0;
-        const wasActive = previousGain > 0;
-        const isActive = currentGain > 0;
-        const existing = soundRefs.current.get(sound.id);
+// After the app itself plays or pauses, status updates lag behind for a moment;
+// mismatches inside this window are ours, not the lock screen's.
+const OWN_COMMAND_GRACE_MS = 1500;
 
-        if (!isActive && wasActive && existing) {
-          try {
-            await existing.stopAsync();
-          } catch (error) {
-            console.warn('Failed stopping sound', sound.id, error);
-          }
-          try {
-            await existing.unloadAsync();
-          } catch (error) {
-            console.warn('Failed unloading sound', sound.id, error);
-          }
-          soundRefs.current.delete(sound.id);
+/**
+ * Drives one looping player per active sound. Player properties are set
+ * synchronously, so rapid slider changes can't race each other; only the
+ * one-off preparation of a sound's file is asynchronous.
+ */
+class MobileMixerEngine {
+  private readonly definitions = new Map<string, SoundDefinition>();
+  private readonly players = new Map<string, AudioPlayer>();
+  private readonly preparing = new Set<string>();
+  private state: EngineState = { gains: {}, masterVolume: 0, isPlaying: false };
+  private anchorId: string | null = null;
+  private anchorSubscription: { remove(): void } | null = null;
+  private lastOwnCommandAt = 0;
+  private disposed = false;
+
+  constructor(
+    sounds: SoundDefinition[],
+    private readonly callbacks: EngineCallbacks
+  ) {
+    sounds.forEach((sound) => this.definitions.set(sound.id, sound));
+  }
+
+  update(state: EngineState) {
+    if (state.isPlaying !== this.state.isPlaying) {
+      this.lastOwnCommandAt = Date.now();
+    }
+    this.state = state;
+    this.apply();
+  }
+
+  /** (Re)start after `dispose()`, e.g. when Fast Refresh re-runs effects. */
+  activate() {
+    this.disposed = false;
+    this.apply();
+  }
+
+  dispose() {
+    this.disposed = true;
+    this.releaseAnchor();
+    this.players.forEach((player) => player.remove());
+    this.players.clear();
+  }
+
+  private apply() {
+    if (this.disposed) {
+      return;
+    }
+    const { gains, masterVolume, isPlaying } = this.state;
+
+    this.definitions.forEach((_definition, soundId) => {
+      const gain = gains[soundId] ?? 0;
+      const player = this.players.get(soundId);
+
+      if (gain <= 0) {
+        if (player?.playing) {
+          player.pause();
         }
-
-        if (isActive && !existing) {
-          const source = { uri: buildAssetUrl(appConfig, sound.file.path) };
-          try {
-            const result = await Audio.Sound.createAsync(source, {
-              volume: currentGain,
-              isLooping: true,
-              shouldPlay: true
-            });
-            if (!isCancelled) {
-              soundRefs.current.set(sound.id, result.sound);
-            } else {
-              await result.sound.unloadAsync();
-            }
-          } catch (error) {
-            console.error('Failed loading sound', sound.id, error);
-          }
-          continue;
-        }
-
-        if (isActive && existing) {
-          try {
-            await existing.setVolumeAsync(currentGain);
-            const status = await existing.getStatusAsync();
-            if (!('isPlaying' in status) || !status.isPlaying) {
-              await existing.playAsync();
-            }
-          } catch (error) {
-            console.warn('Failed updating sound', sound.id, error);
-          }
-        }
+        return;
+      }
+      if (!player) {
+        this.prepare(soundId);
+        return;
       }
 
-      previousGains.current = { ...mix.gains };
-    };
+      // Master volume scales every layer; expo-audio has no shared bus.
+      player.volume = gain * masterVolume;
+      if (isPlaying && !player.playing) {
+        player.play();
+      } else if (!isPlaying && player.playing) {
+        player.pause();
+      }
+    });
 
-    void sync();
+    this.updateAnchor();
+  }
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [mix, sounds]);
+  private prepare(soundId: string) {
+    const definition = this.definitions.get(soundId);
+    if (!definition || this.preparing.has(soundId)) {
+      return;
+    }
+    this.preparing.add(soundId);
+
+    resolveSoundUri(definition)
+      .then((uri) => {
+        if (this.disposed || this.players.has(soundId)) {
+          return;
+        }
+        const player = createAudioPlayer({ uri });
+        player.loop = true;
+        player.volume = 0;
+        this.players.set(soundId, player);
+        this.apply();
+      })
+      .catch((error: unknown) => console.warn(`Could not load sound "${soundId}"`, error))
+      .finally(() => this.preparing.delete(soundId));
+  }
+
+  /**
+   * One playing layer "owns" the lock-screen controls. On Android this also
+   * runs the media playback service that keeps audio going while locked.
+   */
+  private updateAnchor() {
+    const { gains, isPlaying } = this.state;
+    const stillValid =
+      this.anchorId !== null && (gains[this.anchorId] ?? 0) > 0 && this.players.has(this.anchorId);
+    if (stillValid) {
+      return;
+    }
+
+    this.releaseAnchor();
+    const candidate = [...this.players.keys()].find((id) => (gains[id] ?? 0) > 0);
+    if (!candidate || !isPlaying) {
+      return;
+    }
+
+    const player = this.players.get(candidate);
+    if (!player) {
+      return;
+    }
+    this.anchorId = candidate;
+    player.setActiveForLockScreen(true, { title: 'Soundscape Mixer', artist: 'Ambient mix' });
+    this.anchorSubscription = player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+      this.handleAnchorStatus(status);
+    });
+  }
+
+  private releaseAnchor() {
+    this.anchorSubscription?.remove();
+    this.anchorSubscription = null;
+    if (this.anchorId) {
+      this.players.get(this.anchorId)?.clearLockScreenControls();
+    }
+    this.anchorId = null;
+  }
+
+  private handleAnchorStatus(status: AudioStatus) {
+    if (!status.isLoaded || Date.now() - this.lastOwnCommandAt < OWN_COMMAND_GRACE_MS) {
+      return;
+    }
+    if (status.playing !== this.state.isPlaying) {
+      // The lock screen or a headset button paused/resumed the anchor layer:
+      // follow it with the whole mix.
+      this.lastOwnCommandAt = Date.now();
+      this.callbacks.onExternalPlayingChange(status.playing);
+    }
+  }
+}
+
+export function useMixerAudio(
+  sounds: SoundDefinition[],
+  mix: EngineState,
+  onExternalPlayingChange: (isPlaying: boolean) => void
+) {
+  const callbackRef = useRef(onExternalPlayingChange);
+  callbackRef.current = onExternalPlayingChange;
+
+  const [engine] = useState(
+    () =>
+      new MobileMixerEngine(sounds, {
+        onExternalPlayingChange: (playing) => callbackRef.current(playing),
+      })
+  );
 
   useEffect(() => {
-    return () => {
-      soundRefs.current.forEach((instance) => {
-        void instance.stopAsync().catch(() => undefined);
-        void instance.unloadAsync().catch(() => undefined);
-      });
-      soundRefs.current.clear();
-    };
-  }, []);
+    engine.activate();
+    void setAudioModeAsync({
+      playsInSilentMode: true,
+      // A sleep and focus app has to keep playing with the screen locked.
+      shouldPlayInBackground: true,
+      interruptionMode: 'doNotMix',
+    }).catch((error: unknown) => console.warn('Could not configure the audio session', error));
+    return () => engine.dispose();
+  }, [engine]);
+
+  useEffect(() => {
+    engine.update(mix);
+  }, [engine, mix]);
 }

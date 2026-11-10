@@ -9,15 +9,24 @@ export function ensureLeadingSlash(value: string) {
 }
 
 export function buildApiUrl(config: AppConfig, path: string) {
+  if (!config.apiBaseUrl) {
+    throw new Error('No API base URL is configured');
+  }
   return `${trimTrailingSlash(config.apiBaseUrl)}${ensureLeadingSlash(path)}`;
 }
 
 export function buildAppUrl(config: AppConfig, path: string) {
-  const base = config.appUrl ?? config.apiBaseUrl;
-  return `${trimTrailingSlash(base)}${ensureLeadingSlash(path)}`;
+  if (!config.appUrl) {
+    throw new Error('No app URL is configured');
+  }
+  return `${trimTrailingSlash(config.appUrl)}${ensureLeadingSlash(path)}`;
 }
 
+/**
+ * Resolve a static asset. With no asset or CDN origin configured the path stays
+ * relative, so web builds load assets from whatever host serves the page.
+ */
 export function buildAssetUrl(config: AppConfig, path: string) {
-  const base = config.assetBaseUrl ?? config.cdnBucketUrl ?? config.appUrl ?? config.apiBaseUrl;
-  return `${trimTrailingSlash(base)}${ensureLeadingSlash(path)}`;
+  const base = config.assetBaseUrl ?? config.cdnBucketUrl;
+  return base ? `${trimTrailingSlash(base)}${ensureLeadingSlash(path)}` : ensureLeadingSlash(path);
 }

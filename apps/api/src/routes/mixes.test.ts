@@ -23,8 +23,13 @@ const mockedPrisma = prisma as unknown as {
 
 const mockTimestamp = new Date('2025-01-01T00:00:00Z');
 
+interface TransactionClient {
+  sound: { createMany: ReturnType<typeof vi.fn> };
+  mix: { create: ReturnType<typeof vi.fn> };
+}
+
 let mixCreateMock: ReturnType<typeof vi.fn>;
-let soundUpsertMock: ReturnType<typeof vi.fn>;
+let soundCreateManyMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   mixCreateMock = vi.fn().mockResolvedValue({
@@ -40,11 +45,11 @@ beforeEach(() => {
     ]
   });
 
-  soundUpsertMock = vi.fn().mockResolvedValue(undefined);
+  soundCreateManyMock = vi.fn().mockResolvedValue({ count: 1 });
 
-  mockedPrisma.$transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+  mockedPrisma.$transaction.mockImplementation(async (callback: (tx: TransactionClient) => Promise<unknown>) => {
     return callback({
-      sound: { upsert: soundUpsertMock },
+      sound: { createMany: soundCreateManyMock },
       mix: { create: mixCreateMock }
     });
   });
@@ -67,10 +72,10 @@ describe('POST /api/mixes', () => {
       .expect(201);
 
     expect(mockedPrisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(soundUpsertMock).toHaveBeenCalledWith({
-      where: { id: 'rain-shower' },
-      update: expect.any(Object),
-      create: expect.any(Object)
+    expect(soundCreateManyMock).toHaveBeenCalledTimes(1);
+    expect(soundCreateManyMock).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ id: 'rain-shower', name: 'Gentle Rain', fileUrl: null })],
+      skipDuplicates: true
     });
     expect(mixCreateMock).toHaveBeenCalledWith({
       data: {
@@ -111,6 +116,35 @@ describe('POST /api/mixes', () => {
 
     expect(response.body.message).toBe('Duplicate sounds are not allowed in a mix');
     expect(mockedPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects payloads with more sounds than the library has', async () => {
+    const app = createApp();
+
+    const response = await request(app)
+      .post('/api/mixes')
+      .send({
+        masterVolume: 0.5,
+        sounds: Array.from({ length: 50 }, (_, index) => ({ soundId: `sound-${index}`, volume: 0.5 }))
+      })
+      .expect(422);
+
+    expect(response.body.message).toBe('Invalid mix payload');
+    expect(mockedPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not leak database errors to the client', async () => {
+    mockedPrisma.$transaction.mockRejectedValueOnce(new Error('connect ECONNREFUSED 10.0.0.5:5432'));
+    const app = createApp();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const response = await request(app)
+      .post('/api/mixes')
+      .send({ masterVolume: 0.5, sounds: [{ soundId: 'rain-shower', volume: 0.5 }] })
+      .expect(500);
+
+    expect(response.body).toEqual({ message: 'Internal Server Error' });
+    consoleError.mockRestore();
   });
 
   it('rejects unknown sound identifiers', async () => {
