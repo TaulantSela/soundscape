@@ -21,7 +21,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // expo-audio's manifest asks for the microphone; this app only plays audio.
     blockedPermissions: ['android.permission.RECORD_AUDIO']
   },
-  plugins: [['expo-audio', { microphonePermission: false, recordAudioAndroid: false }]],
+  plugins: [
+    ['expo-audio', { microphonePermission: false, recordAudioAndroid: false }],
+    // Xcode 27 rejects the iOS 13.4 minimum some pod resource bundles still declare.
+    './plugins/with-pod-resource-deployment-target',
+  ],
   extra: {
     environment: process.env.EXPO_PUBLIC_ENV ?? process.env.NODE_ENV ?? 'development',
     appUrl: process.env.EXPO_PUBLIC_APP_URL,
