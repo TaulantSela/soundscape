@@ -1,36 +1,60 @@
+'use client';
+
 import Link from 'next/link';
+import { useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
+import { AuthCard, FormMessage, TextField } from '@/components/auth/auth-ui';
+import { authClient } from '@/lib/auth/client';
 
 export default function ForgotPasswordPage() {
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setPending(true);
+    setError(null);
+    const { error: resetError } = await authClient.requestPasswordReset({
+      email: String(form.get('email') ?? '').trim(),
+      redirectTo: `${window.location.origin}/auth/reset-password`
+    });
+    setPending(false);
+    if (resetError) {
+      setError(resetError.message ?? "Couldn't send the email. Please try again.");
+      return;
+    }
+    setSent(true);
+  }
+
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-16">
-      <div className="rounded-3xl border border-surfaceRaised bg-surface/80 p-8 backdrop-blur">
-        <h1 className="text-2xl font-semibold text-slate-100">Reset your password</h1>
-        <p className="mt-1 text-sm text-textMuted">Enter your email and we will send a reset link.</p>
-
-        <form className="mt-8 space-y-5">
-          <label className="flex flex-col gap-2 text-sm text-slate-100">
-            Email
-            <input
-              type="email"
-              name="email"
-              placeholder="you@example.com"
-              className="rounded-2xl border border-surfaceRaised bg-background/80 px-4 py-3 text-slate-100 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/40"
-              required
-            />
-          </label>
-          <Button type="submit" className="w-full" disabled>
-            Send reset link (coming soon)
-          </Button>
-        </form>
-
-        <p className="mt-6 text-sm text-textMuted">
+    <AuthCard
+      title="Reset your password"
+      description="Enter your email and we'll send you a link to choose a new password."
+      footer={
+        <p>
           Remembered it?{' '}
           <Link href="/auth/login" className="text-accent hover:text-accentMuted">
-            Go back to sign in
+            Back to sign in
           </Link>
         </p>
-      </div>
-    </main>
+      }
+    >
+      {sent ? (
+        <div className="mt-8">
+          {/* The same message either way, so the form can't reveal who has an account. */}
+          <FormMessage tone="info">If an account exists for that email, a reset link is on its way.</FormMessage>
+        </div>
+      ) : (
+        <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+          <TextField label="Email" type="email" name="email" autoComplete="email" placeholder="you@example.com" required />
+          {error ? <FormMessage>{error}</FormMessage> : null}
+          <Button type="submit" className="w-full" disabled={pending}>
+            {pending ? 'Sending…' : 'Send reset link'}
+          </Button>
+        </form>
+      )}
+    </AuthCard>
   );
 }
