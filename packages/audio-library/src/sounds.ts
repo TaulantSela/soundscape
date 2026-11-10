@@ -1,5 +1,8 @@
 import { soundDefinitionSchema, type SoundDefinition } from './types';
 
+// None of these sounds ship a recording yet: each one is synthesized on the
+// device from `synth/generators.ts`. To use a recording instead, add
+// `file: { path: '/audio/<id>.mp3', format: 'mp3' }` to the definition.
 const sounds: SoundDefinition[] = [
   {
     id: 'rain-shower',
@@ -7,10 +10,9 @@ const sounds: SoundDefinition[] = [
     category: 'nature',
     emoji: '🌧️',
     color: '#4f7cac',
-    file: { path: '/audio/rain-shower.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.7,
     order: 1,
-    description: 'Soft rainfall recorded under a covered patio.'
+    description: 'Soft, steady rainfall with light droplets.'
   },
   {
     id: 'distant-thunder',
@@ -18,7 +20,6 @@ const sounds: SoundDefinition[] = [
     category: 'nature',
     emoji: '⛈️',
     color: '#3b3c61',
-    file: { path: '/audio/distant-thunder.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.4,
     order: 2,
     description: 'Low rumbles of thunder with long tails.'
@@ -29,10 +30,9 @@ const sounds: SoundDefinition[] = [
     category: 'nature',
     emoji: '🌊',
     color: '#2a6f97',
-    file: { path: '/audio/ocean-tide.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.6,
     order: 3,
-    description: 'Rolling ocean tide captured at dusk.'
+    description: 'Slow waves rolling in and washing back out.'
   },
   {
     id: 'forest-birds',
@@ -40,7 +40,6 @@ const sounds: SoundDefinition[] = [
     category: 'nature',
     emoji: '🐦',
     color: '#5c946e',
-    file: { path: '/audio/forest-birds.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.5,
     order: 4,
     description: 'Light songbirds with distant wind in trees.'
@@ -51,7 +50,6 @@ const sounds: SoundDefinition[] = [
     category: 'urban',
     emoji: '☕️',
     color: '#b85c38',
-    file: { path: '/audio/city-cafe.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.55,
     order: 5,
     description: 'Quiet café ambience with soft conversations.'
@@ -62,7 +60,6 @@ const sounds: SoundDefinition[] = [
     category: 'urban',
     emoji: '🚆',
     color: '#2d4654',
-    file: { path: '/audio/midnight-train.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.45,
     order: 6,
     description: 'Steady train ride with rhythmic track clatter.'
@@ -73,10 +70,9 @@ const sounds: SoundDefinition[] = [
     category: 'urban',
     emoji: '🌆',
     color: '#6c757d',
-    file: { path: '/audio/city-hum.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.5,
     order: 7,
-    description: 'Ambient downtown hum with subtle traffic textures.'
+    description: 'Ambient downtown hum with distant passing traffic.'
   },
   {
     id: 'cozy-fireplace',
@@ -84,7 +80,6 @@ const sounds: SoundDefinition[] = [
     category: 'home',
     emoji: '🔥',
     color: '#d95d39',
-    file: { path: '/audio/cozy-fireplace.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.5,
     order: 8,
     description: 'Crackling logs with occasional pops.'
@@ -95,10 +90,9 @@ const sounds: SoundDefinition[] = [
     category: 'home',
     emoji: '⌨️',
     color: '#8d99ae',
-    file: { path: '/audio/keyboard-typing.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.4,
     order: 9,
-    description: 'Mechanical keyboard typing at a steady pace.'
+    description: 'Keyboard typing at a steady, unhurried pace.'
   },
   {
     id: 'lofi-piano',
@@ -106,10 +100,9 @@ const sounds: SoundDefinition[] = [
     category: 'tones',
     emoji: '🎹',
     color: '#9c95dc',
-    file: { path: '/audio/lofi-piano.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.45,
     order: 10,
-    description: 'Soft, lightly detuned piano progression.'
+    description: 'Soft, slightly wobbly piano chords.'
   },
   {
     id: 'brown-noise',
@@ -117,7 +110,6 @@ const sounds: SoundDefinition[] = [
     category: 'tones',
     emoji: '🟤',
     color: '#836953',
-    file: { path: '/audio/brown-noise.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.35,
     order: 11,
     description: 'Low-end focused brown noise for masking distractions.'
@@ -128,14 +120,15 @@ const sounds: SoundDefinition[] = [
     category: 'nature',
     emoji: '🌬️',
     color: '#adb5bd',
-    file: { path: '/audio/airy-wind.mp3', format: 'mp3', loop: true, normalized: true },
     defaultVolume: 0.5,
     order: 12,
-    description: 'Soft gusts through leaves with gentle whoosh.'
+    description: 'Soft gusts through leaves with a gentle whoosh.'
   }
 ];
 
 export const soundLibrary = soundDefinitionSchema.array().parse(sounds);
+
+export const soundIds = soundLibrary.map((sound) => sound.id);
 
 export function getSoundById(id: string) {
   return soundLibrary.find((sound) => sound.id === id);
