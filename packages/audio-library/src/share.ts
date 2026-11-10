@@ -1,6 +1,7 @@
 import { DEFAULT_MASTER_VOLUME } from './mix';
 import { soundIds as librarySoundIds } from './sounds';
 import type { PresetSoundSetting } from './types';
+import { isUserSoundId } from './user-sounds';
 import { clampVolume } from './volume';
 
 /**
@@ -69,22 +70,35 @@ function parsePercent(raw: string | undefined): number | undefined {
   return value <= 100 ? value / 100 : undefined;
 }
 
+const librarySoundIdSet = new Set(librarySoundIds);
+
+/**
+ * Built-in sounds, plus uploaded ones: those travel in the link, but only
+ * their owner's mixer can play them.
+ */
+export function isShareableSoundId(id: string) {
+  return librarySoundIdSet.has(id) || isUserSoundId(id);
+}
+
 /**
  * Parse a shared mix from a query string. Unknown sounds, duplicates and
- * malformed volumes are dropped; returns `null` when no playable sound is left.
+ * malformed volumes are dropped; returns `null` when no sound is left.
  */
 export function decodeSharedMix(
   input: QueryInput,
-  knownSoundIds: Iterable<string> = librarySoundIds
+  knownSoundIds: Iterable<string> | ((id: string) => boolean) = isShareableSoundId
 ): SharedMix | null {
-  const known = new Set(knownSoundIds);
+  const isKnown =
+    typeof knownSoundIds === 'function'
+      ? knownSoundIds
+      : ((ids) => (id: string) => ids.has(id))(new Set(knownSoundIds));
   const seen = new Set<string>();
   const sounds: PresetSoundSetting[] = [];
 
   for (const entry of (readParam(input, 's') ?? '').split(',')) {
     const [soundId, rawVolume, ...rest] = entry.split(':');
     const volume = parsePercent(rawVolume);
-    if (!soundId || rest.length > 0 || !known.has(soundId) || seen.has(soundId) || !volume) {
+    if (!soundId || rest.length > 0 || !isKnown(soundId) || seen.has(soundId) || !volume) {
       continue;
     }
     seen.add(soundId);

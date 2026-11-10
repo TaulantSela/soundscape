@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-export const soundCategorySchema = z.enum(['nature', 'urban', 'home', 'tones']);
+// `mine`: sounds the listener uploaded to their own account.
+export const soundCategorySchema = z.enum(['nature', 'urban', 'home', 'tones', 'mine']);
 export type SoundCategory = z.infer<typeof soundCategorySchema>;
 
 export const soundIdSchema = z.string().min(1);
