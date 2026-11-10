@@ -23,3 +23,5 @@ package-lock.json.save
 .tmp/
 tmp/
 temp/
+*.tsbuildinfo
+apps/desktop/release/

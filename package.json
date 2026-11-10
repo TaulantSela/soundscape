@@ -4,19 +4,24 @@
   "version": "0.1.0",
   "description": "Cross-platform Soundscape Mixer monorepo.",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
+    "build:packages": "npm run build -w @soundscape/config -w @soundscape/audio-library",
     "build": "npm run build --workspaces --if-present",
-    "dev": "npm run dev --workspaces --if-present",
+    "dev": "npm run build:packages && npm run dev -w @soundscape/web",
+    "dev:api": "npm run build:packages && npm run dev -w @soundscape/api",
+    "dev:mobile": "npm run build:packages && npm run start -w @soundscape/mobile",
+    "dev:desktop": "npm run build:packages && npm run dev -w @soundscape/desktop",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
     "format": "npm run format --workspaces --if-present"
   },
   "engines": {
-    "node": ">=18.18.0",
-    "npm": ">=9.0.0"
+    "node": ">=22.12.0",
+    "npm": ">=10.0.0"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.0.0",
@@ -26,6 +31,13 @@
     "eslint-plugin-import": "^2.29.0",
     "eslint-import-resolver-typescript": "^3.6.0",
     "prettier": "^3.1.1",
-    "typescript": "5.5.4"
+    "typescript": "5.5.4",
+    "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "@types/react": "~19.1.17",
+    "@types/react-dom": "~19.1.11"
   }
 }
