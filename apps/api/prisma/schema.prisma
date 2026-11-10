@@ -23,7 +23,8 @@ model Sound {
   id          String  @id
   name        String
   category    String
-  fileUrl     String
+  // Null for synthesized sounds, which have no recording.
+  fileUrl     String?
   defaultGain Float   @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
