@@ -7,14 +7,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
     "@soundscape/audio-library": "file:../../packages/audio-library",
     "@soundscape/config": "file:../../packages/config",
     "clsx": "^2.1.1",
-    "next": "15.5.29",
+    "next": "16.4.6",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "sonner": "^1.7.4",
@@ -26,9 +26,10 @@
     "@types/react": "~19.1.17",
     "@types/react-dom": "~19.1.11",
     "autoprefixer": "^10.4.16",
-    "eslint-config-next": "15.5.29",
+    "eslint-config-next": "16.4.6",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.3",
-    "typescript": "5.5.4"
+    "typescript": "5.5.4",
+    "eslint": "^9.39.1"
   }
 }
