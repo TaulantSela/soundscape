@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createConfig, type CreateConfigOptions } from './config';
+import { createConfig, optionalString, parseFeatureFlags, type CreateConfigOptions } from './config';
 import { environmentNameSchema, runtimeTargetSchema } from './schema';
 
 const envVarSchema = z.object({
@@ -33,10 +33,10 @@ export function loadConfigFromEnv(
   const options: CreateConfigOptions = {
     environment: parsed.NODE_ENV,
     runtime: parsed.RUNTIME_TARGET,
-    appUrl: parsed.PUBLIC_APP_URL,
-    apiBaseUrl: parsed.PUBLIC_API_URL,
-    assetBaseUrl: parsed.PUBLIC_ASSET_URL,
-    cdnBucketUrl: parsed.PUBLIC_CDN_URL,
+    appUrl: optionalString(parsed.PUBLIC_APP_URL),
+    apiBaseUrl: optionalString(parsed.PUBLIC_API_URL),
+    assetBaseUrl: optionalString(parsed.PUBLIC_ASSET_URL),
+    cdnBucketUrl: optionalString(parsed.PUBLIC_CDN_URL),
     build: {
       revision: parsed.BUILD_REVISION,
       timestamp: parsed.BUILD_TIMESTAMP
@@ -47,26 +47,6 @@ export function loadConfigFromEnv(
   };
 
   return createConfig(options);
-}
-
-function parseFeatureFlags(raw: string | undefined) {
-  if (!raw) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') {
-      return Object.keys(parsed).reduce<Record<string, boolean>>((acc, key) => {
-        acc[key] = Boolean((parsed as Record<string, unknown>)[key]);
-        return acc;
-      }, {});
-    }
-  } catch (error) {
-    console.warn('Failed to parse FEATURE_FLAGS JSON value', error);
-  }
-
-  return {};
 }
 
 function normalizeMixDefaults(fadeMs: string | undefined, masterVolume: string | undefined) {
