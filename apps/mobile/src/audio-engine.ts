@@ -20,6 +20,11 @@ interface EngineCallbacks {
 // mismatches inside this window are ours, not the lock screen's.
 const OWN_COMMAND_GRACE_MS = 1500;
 
+// Each time a looping layer wraps around it reports `playing: false` for a
+// moment (expo-audio seeks back to the start and plays again). Only a state
+// that still differs after this delay came from the lock screen or a headset.
+const EXTERNAL_CHANGE_CONFIRM_MS = 600;
+
 /**
  * Drives one looping player per active sound. Player properties are set
  * synchronously, so rapid slider changes can't race each other; only the
@@ -33,6 +38,7 @@ class MobileMixerEngine {
   private anchorId: string | null = null;
   private anchorSubscription: { remove(): void } | null = null;
   private lastOwnCommandAt = 0;
+  private externalChangeTimer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
 
   constructor(
@@ -148,6 +154,8 @@ class MobileMixerEngine {
   }
 
   private releaseAnchor() {
+    clearTimeout(this.externalChangeTimer);
+    this.externalChangeTimer = undefined;
     this.anchorSubscription?.remove();
     this.anchorSubscription = null;
     if (this.anchorId) {
@@ -157,14 +165,30 @@ class MobileMixerEngine {
   }
 
   private handleAnchorStatus(status: AudioStatus) {
-    if (!status.isLoaded || Date.now() - this.lastOwnCommandAt < OWN_COMMAND_GRACE_MS) {
+    // A check is already pending. Don't push it back: a playing player sends
+    // a status every 500 ms, so a resume would never get confirmed.
+    if (!status.isLoaded || status.playing === this.state.isPlaying || this.externalChangeTimer) {
       return;
     }
-    if (status.playing !== this.state.isPlaying) {
+    // Re-check once the player has settled instead of trusting this update:
+    // a loop restart looks like a pause for a moment.
+    this.externalChangeTimer = setTimeout(() => {
+      this.externalChangeTimer = undefined;
+      this.confirmExternalChange();
+    }, EXTERNAL_CHANGE_CONFIRM_MS);
+  }
+
+  private confirmExternalChange() {
+    const anchor = this.anchorId ? this.players.get(this.anchorId) : undefined;
+    if (this.disposed || !anchor || Date.now() - this.lastOwnCommandAt < OWN_COMMAND_GRACE_MS) {
+      return;
+    }
+    const playing = anchor.playing;
+    if (playing !== this.state.isPlaying) {
       // The lock screen or a headset button paused/resumed the anchor layer:
       // follow it with the whole mix.
       this.lastOwnCommandAt = Date.now();
-      this.callbacks.onExternalPlayingChange(status.playing);
+      this.callbacks.onExternalPlayingChange(playing);
     }
   }
 }
