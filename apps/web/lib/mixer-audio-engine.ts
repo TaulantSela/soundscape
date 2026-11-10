@@ -29,6 +29,32 @@ function rampTo(param: AudioParam, value: number, context: BaseAudioContext, sec
   param.linearRampToValueAtTime(value, now + seconds);
 }
 
+const LOOP_CROSSFADE_SECONDS = 0.3;
+
+/**
+ * Make an arbitrary recording loop without a click: the last moments are
+ * faded (equal-power) into the first ones, and the buffer is shortened by the
+ * fade so playback runs from the tail straight into the blended head.
+ */
+function crossfadeLoop(context: BaseAudioContext, buffer: AudioBuffer): AudioBuffer {
+  const fade = Math.min(Math.floor(LOOP_CROSSFADE_SECONDS * buffer.sampleRate), Math.floor(buffer.length / 4));
+  if (fade < 64) {
+    return buffer;
+  }
+  const length = buffer.length - fade;
+  const looped = context.createBuffer(buffer.numberOfChannels, length, buffer.sampleRate);
+  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+    const source = buffer.getChannelData(channel);
+    const target = looped.getChannelData(channel);
+    target.set(source.subarray(0, length));
+    for (let i = 0; i < fade; i++) {
+      const position = (i / fade) * (Math.PI / 2);
+      target[i] = source[i] * Math.sin(position) + source[length + i] * Math.cos(position);
+    }
+  }
+  return looped;
+}
+
 type AudioContextConstructor = typeof AudioContext;
 
 function getAudioContextClass(): AudioContextConstructor | undefined {
@@ -55,6 +81,8 @@ export class MixerAudioEngine {
   private readonly voices = new Map<string, Voice>();
   private readonly loading = new Set<string>();
   private readonly buffers = new Map<string, Promise<AudioBuffer | null>>();
+  /** Uploaded sounds load their bytes through these (authenticated) loaders. */
+  private readonly loaders = new Map<string, () => Promise<ArrayBuffer>>();
   /** Last gain applied per sound, so only changed layers are touched. */
   private applied: Record<string, number> = {};
   private state: EngineState = { gains: {}, masterVolume: 0, isPlaying: false };
@@ -62,6 +90,26 @@ export class MixerAudioEngine {
 
   constructor(sounds: SoundDefinition[]) {
     sounds.forEach((sound) => this.definitions.set(sound.id, sound));
+  }
+
+  /**
+   * Replace the set of uploaded sounds. Removed ones are forgotten (their
+   * layers stop once the mix drops them); new ones load when switched on.
+   */
+  setUploadedSounds(sounds: { definition: SoundDefinition; load: () => Promise<ArrayBuffer> }[]) {
+    const next = new Set(sounds.map((sound) => sound.definition.id));
+    for (const id of this.loaders.keys()) {
+      if (!next.has(id)) {
+        this.loaders.delete(id);
+        this.definitions.delete(id);
+        this.buffers.delete(id);
+      }
+    }
+    for (const { definition, load } of sounds) {
+      this.definitions.set(definition.id, definition);
+      this.loaders.set(definition.id, load);
+    }
+    this.sync();
   }
 
   /** Create or resume the audio context. Call from a user gesture. */
@@ -114,7 +162,10 @@ export class MixerAudioEngine {
       return null;
     }
 
-    // iOS: play through the silent switch, like any other media app.
+    // iOS: play through the silent switch, like any other media app. This
+    // also keeps the mix playing with the screen locked or another app in
+    // front: without it Safari interrupts the context the moment the page is
+    // hidden (verified on iOS 26.5).
     const audioSession = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
     if (audioSession) {
       try {
@@ -267,6 +318,11 @@ export class MixerAudioEngine {
   }
 
   private async loadBuffer(context: AudioContext, soundId: string): Promise<AudioBuffer> {
+    const loader = this.loaders.get(soundId);
+    if (loader) {
+      return crossfadeLoop(context, await context.decodeAudioData(await loader()));
+    }
+
     const definition = this.definitions.get(soundId);
     const url = definition ? getSoundUrl(definition) : undefined;
 

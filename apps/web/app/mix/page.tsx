@@ -7,6 +7,11 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 function describeMix(soundIds: string[]) {
   const names = soundIds.map((id) => getSoundById(id)?.name).filter((name): name is string => Boolean(name));
+  // Uploaded sounds are private: count them, never name them.
+  const privateCount = soundIds.length - names.length;
+  if (privateCount > 0) {
+    names.push(privateCount === 1 ? 'a private sound' : `${privateCount} private sounds`);
+  }
   if (names.length <= 1) {
     return names.join('');
   }

@@ -1,10 +1,25 @@
 # @soundscape/web
 
-Next.js 15 app that delivers the Soundscape Mixer in the browser. It uses the shared audio library for sounds, presets and share links, Zustand for state, and Tailwind CSS for styling. It needs no backend.
+Next.js 16 app that delivers the Soundscape Mixer in the browser. It uses the shared audio library for sounds, presets and share links, Zustand for state, and Tailwind CSS for styling. The mixer itself needs no backend; accounts and uploaded sounds use Neon (Postgres + Managed Better Auth) and a private Vercel Blob store.
 
 ## Environment
 
-Everything is optional. Create `apps/web/.env.local` only to override defaults:
+Accounts and uploads need the project's server variables. Pull them from Vercel (the repo root is linked to the `soundscape-web` project):
+
+```bash
+vercel env pull apps/web/.env.local
+```
+
+| Variable | Used for |
+| --- | --- |
+| `DATABASE_URL` | Neon Postgres (`user_sounds`) |
+| `NEON_AUTH_BASE_URL` | Managed Better Auth endpoint |
+| `NEON_AUTH_COOKIE_SECRET` | Signs the session-data cookie (32+ random characters, different per environment) |
+| `BLOB_READ_WRITE_TOKEN` | Private Blob store `soundscape-uploads`: signed upload and download URLs |
+
+Local development and production currently share one database. Use throwaway accounts when testing and delete them afterwards.
+
+The rest is optional; set it in `apps/web/.env.local` to override defaults:
 
 ```
 # Origin used in share links. Defaults to the site the visitor is on.
@@ -23,7 +38,10 @@ npm run dev --workspace @soundscape/web        # development server
 npm run build --workspace @soundscape/web      # production build
 npm run lint --workspace @soundscape/web
 npm run typecheck --workspace @soundscape/web
+npm run db:migrate --workspace @soundscape/web # apply db/migrations/*.sql once each
 ```
+
+Safari refuses the auth cookies (`__Secure-…`, `Secure`) on plain `http://localhost`, so test sign-in locally in Chrome, or over HTTPS (a preview deployment).
 
 Build the shared packages first (`npm run build:packages` at the root); `npm run dev` at the root does both.
 
@@ -41,3 +59,14 @@ Build the shared packages first (`npm run build:packages` at the root); `npm run
 - Share links that copy to the clipboard (or open the share sheet on touch devices) and open at `/mix`
 - The mix is saved to localStorage; playback always starts stopped after a reload
 - Inside the Electron shell, the tray's Play/Pause reaches the page through `window.soundscapeDesktop`
+
+## Accounts and uploaded sounds
+
+- Sign-in is Managed Better Auth (`@neon/auth`): email and password, or Google. `app/api/auth/[...path]` proxies every auth call so the session cookie stays on this domain. Google is hidden inside the desktop app, because Google refuses to sign in from embedded browsers.
+- Uploaded sounds are private: only their owner can list or play them. A shared mix keeps their ids (`u-<uuid>`) in the link; anyone else hears the mix without those layers, and the banner says so.
+- Uploading takes three steps, because functions can't receive bodies over 4.5 MB:
+  1. `POST /api/sounds/uploads` checks the type and size and reserves quota (atomically, per user), then returns a presigned `PUT` URL for exactly one pathname, size and content type.
+  2. The browser `PUT`s the file straight to Blob, which enforces those limits itself.
+  3. `POST /api/sounds/:id/complete` confirms the file with `head()` and adds it to the library. Unconfirmed reservations expire after 15 minutes.
+- Playback asks `GET /api/sounds/:id/file` for a 15-minute signed URL and downloads straight from Blob. The engine crossfades the end of each upload into its start so arbitrary recordings loop without a click.
+- Limits (shared with mobile, in `packages/audio-library/src/user-sounds.ts`): MP3, M4A, AAC or WAV; up to 20 MB and 3 minutes per file; 50 sounds and 200 MB per account. The browser decodes each file before uploading it, to reject non-audio and over-long files early.

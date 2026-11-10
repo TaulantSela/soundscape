@@ -10,9 +10,11 @@ interface SoundCardProps {
   isActive: boolean;
   onToggle: () => void;
   onVolumeChange: (value: number) => void;
+  /** Shown for the listener's own uploads. */
+  onDelete?: () => void;
 }
 
-export function SoundCard({ sound, volume, isActive, onToggle, onVolumeChange }: SoundCardProps) {
+export function SoundCard({ sound, volume, isActive, onToggle, onVolumeChange, onDelete }: SoundCardProps) {
   return (
     <div
       className={cn(
@@ -34,8 +36,19 @@ export function SoundCard({ sound, volume, isActive, onToggle, onVolumeChange }:
           {sound.emoji ?? '🎧'}
         </span>
         <span className="text-lg font-semibold text-slate-100">{sound.name}</span>
-        <span className="text-sm text-textMuted capitalize">{sound.category}</span>
+        <span className="text-sm text-textMuted capitalize">{sound.category === 'mine' ? 'Your upload' : sound.category}</span>
       </button>
+
+      {onDelete ? (
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label={`Delete ${sound.name}`}
+          className="absolute right-3 top-3 z-10 rounded-full px-2 py-1 text-xs text-textMuted transition-colors hover:bg-surface hover:text-rose-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          Delete
+        </button>
+      ) : null}
 
       <div className="mt-6 flex flex-col gap-2">
         <Slider

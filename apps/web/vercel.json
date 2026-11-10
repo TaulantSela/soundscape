@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "cd ../.. && npm install",
-  "buildCommand": "cd ../.. && npm run build:packages && cd apps/web && next build"
+  "buildCommand": "cd ../.. && npm run build:packages && cd apps/web && next build",
+  "regions": [
+    "fra1"
+  ]
 }

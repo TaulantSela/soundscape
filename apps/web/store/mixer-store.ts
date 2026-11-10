@@ -7,6 +7,7 @@ import {
   clampVolume,
   createEmptyMix,
   hasActiveSounds,
+  isUserSoundId,
   serializeMix,
   setMasterVolume as updateMasterVolume,
   setSoundVolume as updateSoundVolume,
@@ -36,9 +37,23 @@ export interface MixerStore {
   activePresetId?: string;
   hydrated: boolean;
   mode: MixerMode;
+  /** Bumped by each start*Session, so dependants know `sounds` was reset. */
+  sessionVersion: number;
+  /**
+   * Volumes for uploaded sounds (from the saved mix or a shared link) that
+   * wait for the account's sound list before they can join the mix.
+   */
+  pendingUserGains: Record<string, number>;
+  /** Layers of a shared mix that are someone else's private uploads. */
+  unavailableUserSounds: number;
   startPersonalSession: (sounds: SoundDefinition[], presets: PresetDefinition[]) => Promise<void>;
   startSharedSession: (sounds: SoundDefinition[], presets: PresetDefinition[], sharedMix: SharedMix) => void;
   keepSharedMix: () => void;
+  /**
+   * The signed-in account's uploaded sounds (empty when signed out). Pending
+   * volumes for them are applied; the rest are dropped.
+   */
+  setUserSounds: (userSounds: SoundDefinition[]) => void;
   toggleSound: (soundId: string) => void;
   setSoundVolume: (soundId: string, volume: number) => void;
   setMasterVolume: (volume: number) => void;
@@ -100,6 +115,11 @@ function sanitizeVolumes(raw: Record<string, unknown> | undefined, soundIds: str
   return volumes;
 }
 
+/** Saved volumes of uploaded sounds; their definitions arrive after sign-in. */
+function userSoundVolumes(raw: Record<string, unknown> | undefined) {
+  return sanitizeVolumes(raw, Object.keys(raw ?? {}).filter(isUserSoundId));
+}
+
 const emptyMix = createEmptyMix([], DEFAULT_MASTER_VOLUME);
 
 export const useMixerStore = create<MixerStore>()(
@@ -112,21 +132,27 @@ export const useMixerStore = create<MixerStore>()(
       activePresetId: undefined,
       hydrated: false,
       mode: 'personal',
+      sessionVersion: 0,
+      pendingUserGains: {},
+      unavailableUserSounds: 0,
 
       startPersonalSession: async (sounds, presets) => {
         persistenceEnabled = false;
-        set({
+        set((state) => ({
           sounds,
           presets,
           mode: 'personal',
           hydrated: false,
+          sessionVersion: state.sessionVersion + 1,
           mix: createEmptyMix(
             sounds.map((sound) => sound.id),
             DEFAULT_MASTER_VOLUME
           ),
           lastVolumes: {},
+          pendingUserGains: {},
+          unavailableUserSounds: 0,
           activePresetId: undefined
-        });
+        }));
 
         try {
           await useMixerStore.persist.rehydrate();
@@ -144,21 +170,55 @@ export const useMixerStore = create<MixerStore>()(
           sounds.map((sound) => sound.id),
           sharedMix.masterVolume
         );
-        set({
+        // Uploaded sounds can only join once we know whose they are.
+        const uploaded = sharedMix.sounds.filter((item) => isUserSoundId(item.soundId));
+        const builtIn = sharedMix.sounds.filter((item) => !isUserSoundId(item.soundId));
+        set((state) => ({
           sounds,
           presets,
           mode: 'shared',
           hydrated: true,
+          sessionVersion: state.sessionVersion + 1,
           // Replace, never merge: the shared mix is exactly what was shared.
-          mix: applyPresetToMix(base, sharedMix.sounds),
+          mix: applyPresetToMix(base, builtIn),
           lastVolumes: Object.fromEntries(sharedMix.sounds.map((item) => [item.soundId, item.volume])),
+          pendingUserGains: Object.fromEntries(uploaded.map((item) => [item.soundId, item.volume])),
+          unavailableUserSounds: 0,
           activePresetId: undefined
-        });
+        }));
       },
 
       keepSharedMix: () => {
         persistenceEnabled = true;
-        set({ mode: 'personal' });
+        set({ mode: 'personal', unavailableUserSounds: 0 });
+      },
+
+      setUserSounds: (userSounds) => {
+        set((state) => {
+          const available = new Set(userSounds.map((sound) => sound.id));
+          const gains: Record<string, number> = {};
+          for (const [id, volume] of Object.entries(state.mix.gains)) {
+            if (!isUserSoundId(id) || available.has(id)) {
+              gains[id] = volume;
+            }
+          }
+          for (const sound of userSounds) {
+            gains[sound.id] = state.mix.gains[sound.id] ?? state.pendingUserGains[sound.id] ?? 0;
+          }
+          const unavailable = Object.keys(state.pendingUserGains).filter((id) => !available.has(id)).length;
+          const mix = { ...state.mix, gains };
+
+          return {
+            sounds: [...state.sounds.filter((sound) => !isUserSoundId(sound.id)), ...userSounds],
+            // Signing out (or a deleted sound) may leave nothing to play.
+            mix: { ...mix, isPlaying: mix.isPlaying && hasActiveSounds(mix) },
+            lastVolumes: Object.fromEntries(
+              Object.entries(state.lastVolumes).filter(([id]) => !isUserSoundId(id) || available.has(id))
+            ),
+            pendingUserGains: {},
+            unavailableUserSounds: state.mode === 'shared' ? unavailable : 0
+          };
+        });
       },
 
       toggleSound: (soundId) => {
@@ -232,7 +292,9 @@ export const useMixerStore = create<MixerStore>()(
       skipHydration: true,
       storage: createJSONStorage(() => guardedLocalStorage),
       partialize: (state): PersistedMixerState => ({
-        mix: { gains: state.mix.gains, masterVolume: state.mix.masterVolume },
+        // Keep uploaded-sound volumes that are still waiting for sign-in, so
+        // changing a built-in layer meanwhile doesn't throw them away.
+        mix: { gains: { ...state.pendingUserGains, ...state.mix.gains }, masterVolume: state.mix.masterVolume },
         lastVolumes: state.lastVolumes,
         activePresetId: state.activePresetId
       }),
@@ -248,7 +310,8 @@ export const useMixerStore = create<MixerStore>()(
         return {
           ...current,
           mix: { isPlaying: false, masterVolume, gains },
-          lastVolumes: sanitizeVolumes(saved.lastVolumes, soundIds),
+          lastVolumes: { ...userSoundVolumes(saved.lastVolumes), ...sanitizeVolumes(saved.lastVolumes, soundIds) },
+          pendingUserGains: userSoundVolumes(saved.mix?.gains),
           activePresetId: current.presets.some((preset) => preset.id === activePresetId) ? activePresetId : undefined
         };
       }

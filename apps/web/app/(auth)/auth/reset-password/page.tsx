@@ -1,58 +1,86 @@
+'use client';
+
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
+import { AuthCard, FormMessage, TextField } from '@/components/auth/auth-ui';
+import { authClient } from '@/lib/auth/client';
+
+const MIN_PASSWORD_LENGTH = 8;
+
+function ResetForm() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const token = params.get('token');
+  const linkError = params.get('error');
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  if (!token || linkError) {
+    return (
+      <div className="mt-8 space-y-5">
+        <FormMessage>This reset link is invalid or has expired.</FormMessage>
+        <Link href="/auth/forgot-password" className="text-sm text-accent hover:text-accentMuted">
+          Send a new link
+        </Link>
+      </div>
+    );
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const newPassword = String(form.get('password') ?? '');
+    if (newPassword !== String(form.get('confirm') ?? '')) {
+      setError("The passwords don't match.");
+      return;
+    }
+    setPending(true);
+    setError(null);
+    const { error: resetError } = await authClient.resetPassword({ newPassword, token: token ?? '' });
+    if (resetError) {
+      setPending(false);
+      setError(resetError.message ?? "Couldn't update your password. Please try again.");
+      return;
+    }
+    router.push('/auth/login?reset=1');
+  }
+
+  return (
+    <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+      <TextField
+        label="New password"
+        type="password"
+        name="password"
+        autoComplete="new-password"
+        placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
+        minLength={MIN_PASSWORD_LENGTH}
+        required
+      />
+      <TextField
+        label="Confirm password"
+        type="password"
+        name="confirm"
+        autoComplete="new-password"
+        placeholder="Repeat password"
+        minLength={MIN_PASSWORD_LENGTH}
+        required
+      />
+      {error ? <FormMessage>{error}</FormMessage> : null}
+      <Button type="submit" className="w-full" disabled={pending}>
+        {pending ? 'Saving…' : 'Save new password'}
+      </Button>
+    </form>
+  );
+}
 
 export default function ResetPasswordPage() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-16">
-      <div className="rounded-3xl border border-surfaceRaised bg-surface/80 p-8 backdrop-blur">
-        <h1 className="text-2xl font-semibold text-slate-100">Choose a new password</h1>
-        <p className="mt-1 text-sm text-textMuted">Paste the reset code from your email and pick a new password.</p>
-
-        <form className="mt-8 space-y-5">
-          <label className="flex flex-col gap-2 text-sm text-slate-100">
-            Reset token
-            <input
-              type="text"
-              name="token"
-              placeholder="Reset code"
-              className="rounded-2xl border border-surfaceRaised bg-background/80 px-4 py-3 text-slate-100 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/40"
-              required
-            />
-          </label>
-          <label className="flex flex-col gap-2 text-sm text-slate-100">
-            New password
-            <input
-              type="password"
-              name="password"
-              placeholder="At least 8 characters"
-              className="rounded-2xl border border-surfaceRaised bg-background/80 px-4 py-3 text-slate-100 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/40"
-              required
-              minLength={8}
-            />
-          </label>
-          <label className="flex flex-col gap-2 text-sm text-slate-100">
-            Confirm password
-            <input
-              type="password"
-              name="confirmPassword"
-              placeholder="Repeat password"
-              className="rounded-2xl border border-surfaceRaised bg-background/80 px-4 py-3 text-slate-100 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/40"
-              required
-              minLength={8}
-            />
-          </label>
-          <Button type="submit" className="w-full" disabled>
-            Update password (coming soon)
-          </Button>
-        </form>
-
-        <p className="mt-6 text-sm text-textMuted">
-          Return to{' '}
-          <Link href="/auth/login" className="text-accent hover:text-accentMuted">
-            sign in
-          </Link>
-        </p>
-      </div>
-    </main>
+    <AuthCard title="Choose a new password" description="Pick a new password for your Soundscape account.">
+      <Suspense>
+        <ResetForm />
+      </Suspense>
+    </AuthCard>
   );
 }
