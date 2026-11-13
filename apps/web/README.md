@@ -65,7 +65,7 @@ Build the shared packages first (`npm run build:packages` at the root); `npm run
 - Sign-in is Managed Better Auth (`@neon/auth`): email and password, or Google. `app/api/auth/[...path]` proxies every auth call so the session cookie stays on this domain. Google is hidden inside the desktop app, because Google refuses to sign in from embedded browsers.
 - Uploaded sounds are private: only their owner can list or play them. A shared mix keeps their ids (`u-<uuid>`) in the link; anyone else hears the mix without those layers, and the banner says so.
 - Uploading takes three steps, because functions can't receive bodies over 4.5 MB:
-  1. `POST /api/sounds/uploads` checks the type and size and reserves quota (atomically, per user), then returns a presigned `PUT` URL for exactly one pathname, size and content type.
+  1. `POST /api/sounds/uploads` checks the type and size and reserves quota (atomically, per user), then returns a presigned `PUT` URL for exactly one pathname, size and content type. The type is the one Blob files that extension under (`.m4a` is `audio/mp4`), not the browser's name for it: Blob types files by extension and refuses an upload whose allowed types don't include that (Safari reports `.m4a` as `audio/x-m4a`).
   2. The browser `PUT`s the file straight to Blob, which enforces those limits itself.
   3. `POST /api/sounds/:id/complete` confirms the file with `head()` and adds it to the library. Unconfirmed reservations expire after 15 minutes.
 - Playback asks `GET /api/sounds/:id/file` for a 15-minute signed URL and downloads straight from Blob. The engine crossfades the end of each upload into its start (in place, ending the loop before the faded tail) so arbitrary recordings loop without a click.
