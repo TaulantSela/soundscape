@@ -3,7 +3,13 @@
 import Link from 'next/link';
 import { useRef, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
-import { MAX_USER_SOUND_NAME_LENGTH, userSoundNameFromFile, type SoundDefinition, type UserSoundsResponse } from '@soundscape/audio-library';
+import {
+  MAX_USER_SOUND_NAME_LENGTH,
+  MAX_USER_SOUND_SECONDS,
+  userSoundNameFromFile,
+  type SoundDefinition,
+  type UserSoundsResponse
+} from '@soundscape/audio-library';
 import { Button } from '@/components/ui/button';
 import { SoundCard } from '@/components/mixer/sound-card';
 import type { UserSoundsStatus } from '@/hooks/use-user-sounds';
@@ -12,6 +18,8 @@ import { AUDIO_FILE_ACCEPT, inspectAudioFile } from '@/lib/user-sounds-api';
 interface MySoundsProps {
   status: UserSoundsStatus;
   sounds: SoundDefinition[];
+  /** Sounds still downloading or decoding after being switched on. */
+  loadingIds: ReadonlySet<string>;
   usage?: UserSoundsResponse['usage'];
   volumes: Record<string, number>;
   onToggle: (soundId: string) => void;
@@ -20,6 +28,8 @@ interface MySoundsProps {
   onDelete: (soundId: string) => Promise<void>;
   onRetry: () => void;
 }
+
+const MAX_MINUTES = MAX_USER_SOUND_SECONDS / 60;
 
 function formatMegabytes(bytes: number) {
   const value = bytes / (1024 * 1024);
@@ -30,7 +40,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 }
 
-export function MySounds({ status, sounds, usage, volumes, onToggle, onVolumeChange, onUpload, onDelete, onRetry }: MySoundsProps) {
+export function MySounds({ status, sounds, loadingIds, usage, volumes, onToggle, onVolumeChange, onUpload, onDelete, onRetry }: MySoundsProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<{ file: File; name: string } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -128,7 +138,7 @@ export function MySounds({ status, sounds, usage, volumes, onToggle, onVolumeCha
           <Link href="/auth/register" className="text-accent hover:text-accentMuted">
             create an account
           </Link>{' '}
-          to add MP3, M4A or WAV files of up to 3 minutes.
+          to add MP3, M4A or WAV files of up to {MAX_MINUTES} minutes.
         </p>
       ) : null}
 
@@ -171,7 +181,9 @@ export function MySounds({ status, sounds, usage, volumes, onToggle, onVolumeCha
       ) : null}
 
       {status === 'ready' && sounds.length === 0 && !draft ? (
-        <p className="text-sm text-textMuted">No sounds yet. Upload an MP3, M4A or WAV file of up to 3 minutes.</p>
+        <p className="text-sm text-textMuted">
+          No sounds yet. Upload an MP3, M4A or WAV file of up to {MAX_MINUTES} minutes.
+        </p>
       ) : null}
 
       {sounds.length > 0 ? (
@@ -182,6 +194,7 @@ export function MySounds({ status, sounds, usage, volumes, onToggle, onVolumeCha
               sound={sound}
               volume={volumes[sound.id] ?? 0}
               isActive={(volumes[sound.id] ?? 0) > 0}
+              isLoading={loadingIds.has(sound.id)}
               onToggle={() => onToggle(sound.id)}
               onVolumeChange={(value) => onVolumeChange(sound.id, value)}
               onDelete={() => void handleDelete(sound)}

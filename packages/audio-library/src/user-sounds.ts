@@ -11,16 +11,17 @@ const UUID_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const USER_SOUND_ID = new RegExp(`^${USER_SOUND_ID_PREFIX}(${UUID_PATTERN})$`);
 const UUID = new RegExp(`^${UUID_PATTERN}$`);
 
-export const MAX_USER_SOUND_BYTES = 20 * 1024 * 1024;
+/** Ten minutes of MP3 or M4A at any common bitrate; WAV this long is bigger. */
+export const MAX_USER_SOUND_BYTES = 50 * 1024 * 1024;
 export const MAX_USER_SOUNDS = 50;
 export const MAX_USER_STORAGE_BYTES = 200 * 1024 * 1024;
 export const MAX_USER_SOUND_NAME_LENGTH = 60;
 /**
- * Browsers decode a layer into raw samples (about 23 MB per stereo minute at
- * 48 kHz), so long files would exhaust memory on phones. Ambient loops rarely
- * need more than this.
+ * Browsers decode a playing layer into raw samples, about 23 MB per stereo
+ * minute at 48 kHz, so a ten-minute layer holds roughly 230 MB while it's on.
+ * The web engine frees it once the layer has been off for a while.
  */
-export const MAX_USER_SOUND_SECONDS = 180;
+export const MAX_USER_SOUND_SECONDS = 10 * 60;
 
 /** Audio formats every client can decode, with the extension stored files get. */
 export const USER_SOUND_TYPES: Readonly<Record<string, string>> = {
