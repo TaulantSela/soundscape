@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { verifyAppToken } from './app-tokens';
 import { getCurrentUser, type CurrentUser } from './current-user';
 import { UserSoundError } from './user-sounds';
 
@@ -15,16 +16,33 @@ export function jsonError(message: string, status: number) {
 /**
  * State-changing requests from browsers must come from our own pages. The
  * session cookie is SameSite=Lax already; this also refuses cross-site
- * requests that would not send it. Native apps send no Origin header.
+ * requests that would not send it.
  */
 function isAllowedOrigin(request: Request) {
   const origin = request.headers.get('origin');
   return !origin || origin === new URL(request.url).origin;
 }
 
-/** Run an API handler for the signed-in user, mapping known failures to JSON errors. */
+/**
+ * Run an API handler for the signed-in user, mapping known failures to JSON
+ * errors. Browsers are signed in by their session cookie; the native app
+ * sends an access token instead (`Authorization: Bearer`), which another
+ * site can't make a browser send, so it needs no Origin check.
+ */
 export async function withUser(request: Request, handler: (user: CurrentUser) => Promise<Response>) {
   try {
+    const bearer = /^Bearer\s+(\S+)$/i.exec(request.headers.get('authorization') ?? '')?.[1];
+    if (bearer) {
+      const user = await verifyAppToken(bearer);
+      if (!user) {
+        return NextResponse.json(
+          { error: 'Your sign-in has expired. Sign in again.' },
+          { status: 401, headers: { ...NO_STORE, 'WWW-Authenticate': 'Bearer error="invalid_token"' } }
+        );
+      }
+      return await handler(user);
+    }
+
     if (request.method !== 'GET' && request.method !== 'HEAD' && !isAllowedOrigin(request)) {
       return jsonError('Forbidden.', 403);
     }

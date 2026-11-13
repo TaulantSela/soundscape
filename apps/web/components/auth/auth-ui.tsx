@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { authClient } from '@/lib/auth/client';
@@ -64,7 +65,16 @@ const noSubscription = () => () => undefined;
  * Google sign-in. Hidden inside the desktop app: Google refuses to sign in
  * from embedded browsers such as Electron's window.
  */
-export function GoogleButton({ label, onError }: { label: string; onError: (message: string) => void }) {
+export function GoogleButton({
+  label,
+  onError,
+  returnTo = '/'
+}: {
+  label: string;
+  onError: (message: string) => void;
+  /** Path (with query) on this site to come back to after Google. */
+  returnTo?: string;
+}) {
   // Hidden while rendering on the server, then shown unless in the desktop app.
   const isDesktop = useSyncExternalStore(
     noSubscription,
@@ -79,7 +89,7 @@ export function GoogleButton({ label, onError }: { label: string; onError: (mess
 
   async function handleClick() {
     setPending(true);
-    const { error } = await authClient.signIn.social({ provider: 'google', callbackURL: `${window.location.origin}/` });
+    const { error } = await authClient.signIn.social({ provider: 'google', callbackURL: `${window.location.origin}${returnTo}` });
     // On success the browser is already on its way to Google.
     if (error) {
       setPending(false);
@@ -99,4 +109,16 @@ export function GoogleButton({ label, onError }: { label: string; onError: (mess
       </div>
     </>
   );
+}
+
+/**
+ * A sign-in for the native app: Neon Auth's OAuth provider sends the browser
+ * here with a signed query (`client_id`, `sig`, …). The auth client attaches
+ * that query to sign-in requests, which resume the app's authorization, so
+ * links between the auth pages must carry it along unchanged.
+ */
+export function useAppSignIn() {
+  const params = useSearchParams();
+  const isAppSignIn = params.has('client_id') && params.has('sig');
+  return { isAppSignIn, query: isAppSignIn ? params.toString() : '' };
 }

@@ -72,3 +72,17 @@ Build the shared packages first (`npm run build:packages` at the root); `npm run
 - Limits (shared with mobile, in `packages/audio-library/src/user-sounds.ts`): MP3, M4A, AAC or WAV; up to 50 MB and 10 minutes per file; 50 sounds and 200 MB per account. The browser decodes each file at 8 kHz before uploading it, to reject non-audio and over-long files early without holding full-rate samples.
 - Memory: Web Audio plays a layer from decoded samples, about 23 MB per stereo minute at 48 kHz, so a ten-minute upload holds roughly 230 MB while it's on. The engine drops an upload's samples 30 seconds after its layer goes off but keeps the downloaded file, so switching it back on later only decodes again.
 - Safari decodes AAC (M4A) very slowly when it needn't resample: a nine-minute 48 kHz file took 31 s at 48 kHz and 0.45 s at 47,999 Hz (MP3 and WAV don't have this problem). The engine decodes AAC 1 Hz below the context rate and copies the samples into a context-rate buffer, so they play 0.002% fast without a second resampling.
+
+## Signing in from the native app
+
+The app signs in with Neon Auth's OAuth provider (authorization code with PKCE) and calls this API with the access token.
+
+- Neon setup (branch `main` of `soundscape-db`): the OAuth provider is enabled with login page `/auth/login`, consent page `/auth/consent` and the protected resource `https://soundscape-web-one.vercel.app/api`. The app is the public client "Soundscape app" (`FzpipYmjYIcdIDBZcPeUQLpbNQLMQmEF`, no secret), whose only redirect URI is `/auth/app-callback`. These live in Neon, not in this repo: change them with the Neon Console or API.
+- The flow:
+  1. The app opens `/auth/app-authorize?<authorize parameters>` in a sign-in browser. Neon's authorize endpoint answers with JSON rather than a redirect, so this route asks it and redirects to the login page it names.
+  2. The login page signs in (or finds the session) and continues; the auth client attaches the signed `oauth_query` itself. Creating an account goes through the register page with the same query.
+  3. The consent page shows the app and what it may do; Allow sends the browser to `/auth/app-callback?code=…`.
+  4. `/auth/app-callback` redirects to `soundscape://auth/callback?code=…&state=…`, which the sign-in browser hands back to the app. Neon only accepts https redirect URIs for managed clients, hence the hop. PKCE makes an intercepted code useless.
+  5. The app exchanges the code at Neon's token endpoint and sends `Authorization: Bearer <access token>` to `/api/sounds/*`. Access tokens last an hour; refresh tokens 30 days and rotate on each use.
+- The API verifies those tokens in `lib/server/app-tokens.ts` (EdDSA, against Neon's JWKS) and checks the issuer and audience too, because every branch of the project shares signing keys. Bearer requests skip the Origin check: a browser on another site can't send our token.
+- The login and consent pages send `Content-Security-Policy: frame-ancestors 'none'`.
