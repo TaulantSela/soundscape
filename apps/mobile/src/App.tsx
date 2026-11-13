@@ -9,6 +9,7 @@ import {
   clampVolume,
   createEmptyMix,
   hasActiveSounds,
+  isUserSoundId,
   serializeMix,
   setMasterVolume,
   setSoundVolume,
@@ -20,12 +21,16 @@ import {
 } from '@soundscape/audio-library';
 import { buildAppUrl } from '@soundscape/config';
 import { StatusBar } from 'expo-status-bar';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAccount } from './account/use-account';
+import { useUserSounds } from './account/use-user-sounds';
 import { useMixerAudio } from './audio-engine';
+import { PressableButton, Section, SoundRow } from './components';
 import { appConfig } from './config';
+import { YourSounds } from './your-sounds';
 
 const STORAGE_KEY = 'soundscape.mobile.mixer';
 const PERSIST_DELAY_MS = 400;
@@ -38,6 +43,16 @@ interface StoredMixerState {
 
 function toVolume(value: unknown) {
   return typeof value === 'number' ? clampVolume(value) : 0;
+}
+
+/** Saved volumes of uploaded sounds; their list arrives after the account loads. */
+function userSoundVolumes(raw: Record<string, unknown> | undefined) {
+  return Object.fromEntries(
+    Object.entries(raw ?? {})
+      .filter(([id]) => isUserSoundId(id))
+      .map(([id, value]) => [id, toVolume(value)] as const)
+      .filter(([, volume]) => volume > 0)
+  );
 }
 
 /** Rebuild a saved mix against the current sound list. Playback always starts stopped. */
@@ -65,6 +80,8 @@ function Mixer() {
   const [activePresetId, setActivePresetId] = useState<string | undefined>();
   const [hydrated, setHydrated] = useState(false);
   const [isSharing, setSharing] = useState(false);
+  // Saved volumes of uploads, waiting for the account's list.
+  const pendingUserGains = useRef<Record<string, number>>({});
 
   const hasSounds = hasActiveSounds(mix);
 
@@ -72,7 +89,31 @@ function Mixer() {
     setMix((state) => ({ ...state, isPlaying: isPlaying && hasActiveSounds(state) }));
   }, []);
 
-  useMixerAudio(soundLibrary, mix, handleExternalPlayingChange);
+  const engine = useMixerAudio(soundLibrary, mix, handleExternalPlayingChange);
+  const account = useAccount();
+  const userSounds = useUserSounds(engine, account.status, account.email, account.getAccessToken);
+
+  // Once the account's list is known: give its sounds their saved volumes,
+  // and drop layers that are gone (deleted, or signed out).
+  useEffect(() => {
+    if (!hydrated || (userSounds.status !== 'ready' && userSounds.status !== 'signed-out')) {
+      return;
+    }
+    const available = new Set(userSounds.definitions.map((sound) => sound.id));
+    const pending = pendingUserGains.current;
+    pendingUserGains.current = {};
+    setMix((state) => {
+      const gains: Record<string, number> = {};
+      for (const [id, volume] of Object.entries(state.gains)) {
+        if (!isUserSoundId(id) || available.has(id)) gains[id] = volume;
+      }
+      for (const id of available) {
+        gains[id] = state.gains[id] ?? pending[id] ?? 0;
+      }
+      const next = { ...state, gains };
+      return { ...next, isPlaying: next.isPlaying && hasActiveSounds(next) };
+    });
+  }, [hydrated, userSounds.definitions, userSounds.status]);
 
   useEffect(() => {
     const restore = async () => {
@@ -83,13 +124,15 @@ function Mixer() {
         }
         const stored = JSON.parse(raw) as StoredMixerState;
         setMix(restoreMix(stored, soundIds));
-        setLastVolumes(
-          Object.fromEntries(
+        pendingUserGains.current = userSoundVolumes(stored.mix?.gains);
+        setLastVolumes({
+          ...userSoundVolumes(stored.lastVolumes),
+          ...Object.fromEntries(
             soundIds
               .map((id) => [id, toVolume(stored.lastVolumes?.[id])] as const)
               .filter(([, volume]) => volume > 0)
-          )
-        );
+          ),
+        });
         const presetId =
           typeof stored.activePresetId === 'string' ? stored.activePresetId : undefined;
         setActivePresetId(
@@ -113,7 +156,11 @@ function Mixer() {
     // Sliders fire on every step; save once the user pauses.
     const timer = setTimeout(() => {
       const payload: StoredMixerState = {
-        mix: { gains: mix.gains, masterVolume: mix.masterVolume },
+        // Keep uploads' volumes that are still waiting for the account's list.
+        mix: {
+          gains: { ...pendingUserGains.current, ...mix.gains },
+          masterVolume: mix.masterVolume,
+        },
         lastVolumes,
         activePresetId,
       };
@@ -245,6 +292,24 @@ function Mixer() {
           ))}
         </Section>
 
+        <YourSounds
+          accountStatus={account.status}
+          email={account.email}
+          onSignIn={account.signIn}
+          onSignOut={account.signOut}
+          status={userSounds.status}
+          sounds={userSounds.definitions}
+          usage={userSounds.usage}
+          volumes={mix.gains}
+          onToggle={handleToggleSound}
+          onVolumeChange={handleVolumeChange}
+          onUpload={userSounds.upload}
+          onDelete={userSounds.remove}
+          onRetry={userSounds.retry}
+          getPosition={engine.getPosition}
+          onSeek={engine.seek}
+        />
+
         <Section title="Master volume">
           <View style={styles.masterRow}>
             <Slider
@@ -283,90 +348,6 @@ function Mixer() {
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
-function SoundRow({
-  sound,
-  volume,
-  onToggle,
-  onVolumeChange,
-}: {
-  sound: SoundDefinition;
-  volume: number;
-  onToggle: () => void;
-  onVolumeChange: (value: number) => void;
-}) {
-  const isActive = volume > 0;
-  return (
-    <View style={styles.soundRow}>
-      <View style={styles.soundInfo}>
-        <View>
-          <Text style={styles.soundName}>
-            {sound.emoji ? `${sound.emoji} ` : ''}
-            {sound.name}
-          </Text>
-          <Text style={styles.soundCategory}>{sound.category.toUpperCase()}</Text>
-        </View>
-        <Switch
-          value={isActive}
-          onValueChange={onToggle}
-          accessibilityLabel={`${sound.name} on or off`}
-          trackColor={{ true: '#38bdf8', false: '#1f2937' }}
-          thumbColor={isActive ? '#e0f2fe' : '#94a3b8'}
-        />
-      </View>
-      <Slider
-        style={styles.soundSlider}
-        value={volume}
-        disabled={!isActive}
-        onValueChange={onVolumeChange}
-        minimumValue={0}
-        maximumValue={1}
-        step={0.01}
-        accessibilityLabel={`${sound.name} volume`}
-        minimumTrackTintColor={isActive ? '#38bdf8' : '#1f2937'}
-        maximumTrackTintColor="#0f172a"
-        thumbTintColor={isActive ? '#38bdf8' : '#1f2937'}
-      />
-    </View>
-  );
-}
-
-function PressableButton({
-  label,
-  onPress,
-  disabled,
-  active,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  active?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={disabled ? undefined : onPress}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: Boolean(disabled), selected: Boolean(active) }}
-      style={({ pressed }) => [
-        styles.buttonWrapper,
-        active ? styles.buttonWrapperActive : undefined,
-        pressed ? styles.buttonWrapperPressed : undefined,
-        disabled ? styles.buttonWrapperDisabled : undefined,
-      ]}
-    >
-      <Text style={styles.buttonLabel}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -385,39 +366,6 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 15,
     color: '#94a3b8',
-  },
-  section: {
-    gap: 16,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#cbd5f5',
-  },
-  soundRow: {
-    backgroundColor: '#111c36',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-  },
-  soundInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  soundName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#e2e8f0',
-  },
-  soundCategory: {
-    fontSize: 10,
-    letterSpacing: 1,
-    color: '#64748b',
-  },
-  soundSlider: {
-    width: '100%',
   },
   masterRow: {
     backgroundColor: '#111c36',
@@ -440,29 +388,6 @@ const styles = StyleSheet.create({
   },
   transportButton: {
     flex: 1,
-  },
-  buttonWrapper: {
-    backgroundColor: '#1d4ed8',
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 999,
-    alignItems: 'center',
-  },
-  buttonWrapperActive: {
-    backgroundColor: '#2563eb',
-    borderWidth: 1,
-    borderColor: '#7dd3fc',
-  },
-  buttonWrapperPressed: {
-    opacity: 0.85,
-  },
-  buttonWrapperDisabled: {
-    opacity: 0.5,
-  },
-  buttonLabel: {
-    color: '#f8fafc',
-    fontWeight: '600',
-    fontSize: 15,
   },
   presetList: {
     gap: 12,
