@@ -5,6 +5,7 @@ import {
   MAX_USER_STORAGE_BYTES,
   cleanUserSoundName,
   isUuid,
+  storedUserSoundType,
   userSoundExtension,
   type UserSound,
   type UserSoundsResponse
@@ -125,9 +126,9 @@ export async function reserveUpload(
   if (!name) {
     throw new UserSoundError('Give the sound a name.', 400);
   }
-  const contentType = input.contentType.split(';')[0]?.trim().toLowerCase() ?? '';
-  const extension = userSoundExtension(contentType);
-  if (!extension) {
+  const extension = userSoundExtension(input.contentType);
+  const contentType = storedUserSoundType(input.contentType);
+  if (!extension || !contentType) {
     throw new UserSoundError('Upload an MP3, M4A, AAC or WAV file.', 415);
   }
   if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0) {

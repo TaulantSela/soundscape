@@ -23,16 +23,35 @@ export const MAX_USER_SOUND_NAME_LENGTH = 60;
  */
 export const MAX_USER_SOUND_SECONDS = 10 * 60;
 
-/** Audio formats every client can decode, with the extension stored files get. */
+/**
+ * Audio formats every client can decode, under each name browsers report
+ * them by (Safari calls .m4a `audio/x-m4a`, Chrome `audio/mp4`), with the
+ * extension stored files get.
+ */
 export const USER_SOUND_TYPES: Readonly<Record<string, string>> = {
   'audio/mpeg': 'mp3',
   'audio/mp3': 'mp3',
   'audio/mp4': 'm4a',
   'audio/x-m4a': 'm4a',
   'audio/aac': 'aac',
+  'audio/x-aac': 'aac',
   'audio/wav': 'wav',
   'audio/x-wav': 'wav',
-  'audio/wave': 'wav'
+  'audio/wave': 'wav',
+  'audio/vnd.wave': 'wav'
+};
+
+/**
+ * The type storage files each extension under. Vercel Blob derives it from
+ * the pathname, whatever the upload declares, and refuses a presigned upload
+ * whose allowed types don't include it. So uploads are reserved with this
+ * type rather than the browser's.
+ */
+const STORED_TYPES: Readonly<Record<string, string>> = {
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  aac: 'audio/x-aac',
+  wav: 'audio/wav'
 };
 
 export function isUserSoundId(id: string) {
@@ -56,6 +75,12 @@ export function userSoundUuid(id: string) {
 export function userSoundExtension(contentType: string) {
   const type = contentType.split(';')[0]?.trim().toLowerCase() ?? '';
   return USER_SOUND_TYPES[type];
+}
+
+/** The type storage will give a file of this type, or `undefined` if it isn't allowed. */
+export function storedUserSoundType(contentType: string) {
+  const extension = userSoundExtension(contentType);
+  return extension ? STORED_TYPES[extension] : undefined;
 }
 
 /** Trim and collapse whitespace; returns `undefined` when nothing usable is left. */

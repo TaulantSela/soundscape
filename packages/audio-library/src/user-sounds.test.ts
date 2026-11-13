@@ -3,6 +3,7 @@ import { buildSharedMixPath, decodeSharedMix } from './share';
 import {
   cleanUserSoundName,
   isUserSoundId,
+  storedUserSoundType,
   toUserSoundId,
   userSoundExtension,
   userSoundNameFromFile,
@@ -34,6 +35,17 @@ describe('user sound files', () => {
     expect(userSoundExtension('audio/wav')).toBe('wav');
     expect(userSoundExtension('video/mp4')).toBeUndefined();
     expect(userSoundExtension('application/octet-stream')).toBeUndefined();
+  });
+
+  it('reserves uploads under the type storage files their extension as', () => {
+    // Vercel Blob types a file by its extension, so a browser's alias must not reach it.
+    expect(storedUserSoundType('audio/x-m4a')).toBe('audio/mp4');
+    expect(storedUserSoundType('audio/mp4')).toBe('audio/mp4');
+    expect(storedUserSoundType('audio/mp3')).toBe('audio/mpeg');
+    expect(storedUserSoundType('audio/aac')).toBe('audio/x-aac');
+    expect(storedUserSoundType('audio/x-wav; codecs=1')).toBe('audio/wav');
+    expect(storedUserSoundType('audio/wave')).toBe('audio/wav');
+    expect(storedUserSoundType('audio/ogg')).toBeUndefined();
   });
 
   it('cleans names and derives one from a file name', () => {
