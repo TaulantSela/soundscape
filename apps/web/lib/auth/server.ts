@@ -4,7 +4,7 @@ type NeonAuth = ReturnType<typeof createNeonAuth>;
 
 let instance: NeonAuth | undefined;
 
-function requireEnv(name: string) {
+export function requireEnv(name: string) {
   const value = process.env[name]?.trim();
   if (!value) {
     throw new Error(`${name} is not set. Pull the project's environment with \`vercel env pull apps/web/.env.local\`.`);
