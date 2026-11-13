@@ -1,4 +1,4 @@
-import type { SoundDefinition } from '@soundscape/audio-library';
+import { userSoundExtension, type SoundDefinition } from '@soundscape/audio-library';
 import { getSoundUrl } from './audio';
 import { renderSynthLoop } from './synth-client';
 
@@ -31,28 +31,55 @@ function rampTo(param: AudioParam, value: number, context: BaseAudioContext, sec
 
 const LOOP_CROSSFADE_SECONDS = 0.3;
 
+/** How long an uploaded sound's decoded audio is kept after its layer goes off. */
+const RELEASE_AFTER_MS = 30_000;
+
 /**
  * Make an arbitrary recording loop without a click: the last moments are
- * faded (equal-power) into the first ones, and the buffer is shortened by the
- * fade so playback runs from the tail straight into the blended head.
+ * faded (equal-power) into the first ones, and the returned loop end stops
+ * short of them, so playback runs from the tail straight into the blended
+ * head. It works in place because a long upload decodes to hundreds of MB,
+ * and a shortened copy would briefly double that.
  */
-function crossfadeLoop(context: BaseAudioContext, buffer: AudioBuffer): AudioBuffer {
+function crossfadeLoop(buffer: AudioBuffer): number | undefined {
   const fade = Math.min(Math.floor(LOOP_CROSSFADE_SECONDS * buffer.sampleRate), Math.floor(buffer.length / 4));
   if (fade < 64) {
-    return buffer;
+    return undefined;
   }
   const length = buffer.length - fade;
-  const looped = context.createBuffer(buffer.numberOfChannels, length, buffer.sampleRate);
   for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-    const source = buffer.getChannelData(channel);
-    const target = looped.getChannelData(channel);
-    target.set(source.subarray(0, length));
+    const samples = buffer.getChannelData(channel);
     for (let i = 0; i < fade; i++) {
       const position = (i / fade) * (Math.PI / 2);
-      target[i] = source[i] * Math.sin(position) + source[length + i] * Math.cos(position);
+      samples[i] = samples[i] * Math.sin(position) + samples[length + i] * Math.cos(position);
     }
   }
-  return looped;
+  return length / buffer.sampleRate;
+}
+
+/**
+ * Safari decodes AAC extremely slowly when it needn't resample: a nine-minute
+ * 48 kHz M4A takes 30–45 s at 48 kHz but under half a second at 47,999 Hz, and
+ * phones record AAC at the rate Safari plays at. So AAC is decoded 1 Hz below
+ * the context's rate and its samples are copied into a buffer at that rate
+ * (briefly holding both). They play 0.002% fast, far too little to hear, with
+ * no second resampling: playing the 47,999 Hz buffer directly would resample,
+ * and `playbackRate` (a 32-bit float) can't cancel that out exactly.
+ */
+async function decodeAac(context: AudioContext, bytes: ArrayBuffer) {
+  const decoded = await new OfflineAudioContext(1, 1, context.sampleRate - 1).decodeAudioData(bytes);
+  const buffer = context.createBuffer(decoded.numberOfChannels, decoded.length, context.sampleRate);
+  for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
+    buffer.copyToChannel(decoded.getChannelData(channel), channel);
+  }
+  return buffer;
+}
+
+export interface UploadedSound {
+  definition: SoundDefinition;
+  contentType: string;
+  /** Downloads the file (through the account's authenticated API). */
+  load: () => Promise<ArrayBuffer>;
 }
 
 type AudioContextConstructor = typeof AudioContext;
@@ -80,9 +107,20 @@ export class MixerAudioEngine {
   private readonly definitions = new Map<string, SoundDefinition>();
   private readonly voices = new Map<string, Voice>();
   private readonly loading = new Set<string>();
+  /** `loading` as an immutable snapshot, for `useSyncExternalStore`. */
+  private loadingSnapshot: ReadonlySet<string> = new Set();
+  private readonly loadingListeners = new Set<() => void>();
   private readonly buffers = new Map<string, Promise<AudioBuffer | null>>();
-  /** Uploaded sounds load their bytes through these (authenticated) loaders. */
-  private readonly loaders = new Map<string, () => Promise<ArrayBuffer>>();
+  private readonly uploads = new Map<string, UploadedSound>();
+  /**
+   * Downloaded files of uploaded sounds. They outlive the decoded samples, so
+   * switching a layer back on only decodes again: a compressed file is a
+   * fraction of its samples' size, and the account quota bounds the total.
+   */
+  private readonly files = new Map<string, Promise<ArrayBuffer>>();
+  /** Where a crossfaded upload's loop ends; the samples after it only feed the fade. */
+  private readonly loopEnds = new WeakMap<AudioBuffer, number>();
+  private readonly releaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Last gain applied per sound, so only changed layers are touched. */
   private applied: Record<string, number> = {};
   private state: EngineState = { gains: {}, masterVolume: 0, isPlaying: false };
@@ -96,21 +134,33 @@ export class MixerAudioEngine {
    * Replace the set of uploaded sounds. Removed ones are forgotten (their
    * layers stop once the mix drops them); new ones load when switched on.
    */
-  setUploadedSounds(sounds: { definition: SoundDefinition; load: () => Promise<ArrayBuffer> }[]) {
+  setUploadedSounds(sounds: UploadedSound[]) {
     const next = new Set(sounds.map((sound) => sound.definition.id));
-    for (const id of this.loaders.keys()) {
+    for (const id of this.uploads.keys()) {
       if (!next.has(id)) {
-        this.loaders.delete(id);
+        this.uploads.delete(id);
         this.definitions.delete(id);
         this.buffers.delete(id);
+        this.files.delete(id);
+        this.cancelRelease(id);
       }
     }
-    for (const { definition, load } of sounds) {
-      this.definitions.set(definition.id, definition);
-      this.loaders.set(definition.id, load);
+    for (const sound of sounds) {
+      this.definitions.set(sound.definition.id, sound.definition);
+      this.uploads.set(sound.definition.id, sound);
     }
     this.sync();
   }
+
+  /** Sounds whose audio is downloading or decoding. */
+  readonly getLoadingSnapshot = (): ReadonlySet<string> => this.loadingSnapshot;
+
+  readonly subscribeLoading = (listener: () => void) => {
+    this.loadingListeners.add(listener);
+    return () => {
+      this.loadingListeners.delete(listener);
+    };
+  };
 
   /** Create or resume the audio context. Call from a user gesture. */
   unlock() {
@@ -118,8 +168,13 @@ export class MixerAudioEngine {
     if (context && context.state === 'suspended') {
       void context.resume().catch(() => undefined);
     }
-    // If the gesture did not start playback, `sync` suspends again after the fade.
-    this.sync();
+    // If the gesture did not start playback, this suspends again after the
+    // fade. Layers wait for the `setState` the gesture causes: syncing them
+    // now would use the mix from before the click, and could start downloading
+    // an upload that the click is switching off.
+    if (context && this.master) {
+      this.syncPlayback(context, this.master);
+    }
   }
 
   setState(next: EngineState) {
@@ -134,6 +189,8 @@ export class MixerAudioEngine {
 
   dispose() {
     clearTimeout(this.suspendTimer);
+    this.releaseTimers.forEach((timer) => clearTimeout(timer));
+    this.releaseTimers.clear();
     this.voices.forEach((voice) => {
       try {
         voice.source.stop();
@@ -145,6 +202,7 @@ export class MixerAudioEngine {
     });
     this.voices.clear();
     this.loading.clear();
+    this.publishLoading();
     this.applied = {};
     this.master?.disconnect();
     this.master = null;
@@ -260,15 +318,21 @@ export class MixerAudioEngine {
       return;
     }
 
+    this.cancelRelease(soundId);
     this.loading.add(soundId);
+    this.publishLoading();
     void this.getBuffer(context, soundId).then((buffer) => {
       this.loading.delete(soundId);
+      this.publishLoading();
       const master = this.master;
       // The mix may have moved on while the loop was rendering.
       const latest = this.state.gains[soundId] ?? 0;
       if (!buffer || this.context !== context || !master || latest <= 0 || this.voices.has(soundId)) {
         if (this.applied[soundId] === latest && latest > 0 && !this.voices.has(soundId)) {
           delete this.applied[soundId];
+        }
+        if (!this.voices.has(soundId)) {
+          this.scheduleRelease(soundId);
         }
         return;
       }
@@ -277,12 +341,15 @@ export class MixerAudioEngine {
       gain.gain.value = 0;
       gain.connect(master);
 
+      const loopEnd = this.loopEnds.get(buffer) ?? buffer.duration;
       const source = context.createBufferSource();
       source.buffer = buffer;
       source.loop = true;
+      source.loopStart = 0;
+      source.loopEnd = loopEnd;
       source.connect(gain);
       // Start each loop at a random point so layers never line up the same way.
-      source.start(context.currentTime, Math.random() * buffer.duration);
+      source.start(context.currentTime, Math.random() * loopEnd);
 
       this.voices.set(soundId, { source, gain });
       this.applied[soundId] = latest;
@@ -302,6 +369,54 @@ export class MixerAudioEngine {
       voice.gain.disconnect();
     };
     voice.source.stop(context.currentTime + LAYER_FADE_SECONDS + 0.05);
+    this.scheduleRelease(soundId);
+  }
+
+  /**
+   * Uploads can be ten minutes long, which decodes to over 200 MB, so their
+   * samples are dropped once a layer stays off. Switching it back on after
+   * that decodes the kept file again. Built-in loops are small and stay cached.
+   */
+  private scheduleRelease(soundId: string) {
+    if (!this.uploads.has(soundId)) {
+      return;
+    }
+    this.cancelRelease(soundId);
+    this.releaseTimers.set(
+      soundId,
+      setTimeout(() => {
+        this.releaseTimers.delete(soundId);
+        if (!this.voices.has(soundId) && !this.loading.has(soundId)) {
+          this.buffers.delete(soundId);
+        }
+      }, RELEASE_AFTER_MS)
+    );
+  }
+
+  private cancelRelease(soundId: string) {
+    clearTimeout(this.releaseTimers.get(soundId));
+    this.releaseTimers.delete(soundId);
+  }
+
+  private publishLoading() {
+    this.loadingSnapshot = new Set(this.loading);
+    this.loadingListeners.forEach((listener) => listener());
+  }
+
+  private getFile(upload: UploadedSound) {
+    const soundId = upload.definition.id;
+    const cached = this.files.get(soundId);
+    if (cached) {
+      return cached;
+    }
+    const file = upload.load();
+    this.files.set(soundId, file);
+    file.catch(() => {
+      if (this.files.get(soundId) === file) {
+        this.files.delete(soundId);
+      }
+    });
+    return file;
   }
 
   private getBuffer(context: AudioContext, soundId: string) {
@@ -318,9 +433,20 @@ export class MixerAudioEngine {
   }
 
   private async loadBuffer(context: AudioContext, soundId: string): Promise<AudioBuffer> {
-    const loader = this.loaders.get(soundId);
-    if (loader) {
-      return crossfadeLoop(context, await context.decodeAudioData(await loader()));
+    const upload = this.uploads.get(soundId);
+    if (upload) {
+      // decodeAudioData detaches what it's given, so decode a copy.
+      const bytes = (await this.getFile(upload)).slice(0);
+      const extension = userSoundExtension(upload.contentType);
+      const buffer =
+        extension === 'm4a' || extension === 'aac'
+          ? await decodeAac(context, bytes)
+          : await context.decodeAudioData(bytes);
+      const loopEnd = crossfadeLoop(buffer);
+      if (loopEnd !== undefined) {
+        this.loopEnds.set(buffer, loopEnd);
+      }
+      return buffer;
     }
 
     const definition = this.definitions.get(soundId);

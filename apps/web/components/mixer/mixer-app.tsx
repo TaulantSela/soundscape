@@ -153,6 +153,7 @@ export function MixerApp({ sounds, presets, sharedMix }: MixerAppProps) {
           <MySounds
             status={userSounds.status}
             sounds={userSounds.definitions}
+            loadingIds={userSounds.loadingIds}
             usage={userSounds.usage}
             volumes={mix.gains}
             onToggle={(id) => {

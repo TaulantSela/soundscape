@@ -8,13 +8,15 @@ interface SoundCardProps {
   sound: SoundDefinition;
   volume: number;
   isActive: boolean;
+  /** Its audio is still downloading or decoding. */
+  isLoading?: boolean;
   onToggle: () => void;
   onVolumeChange: (value: number) => void;
   /** Shown for the listener's own uploads. */
   onDelete?: () => void;
 }
 
-export function SoundCard({ sound, volume, isActive, onToggle, onVolumeChange, onDelete }: SoundCardProps) {
+export function SoundCard({ sound, volume, isActive, isLoading = false, onToggle, onVolumeChange, onDelete }: SoundCardProps) {
   return (
     <div
       className={cn(
@@ -26,6 +28,7 @@ export function SoundCard({ sound, volume, isActive, onToggle, onVolumeChange, o
         type="button"
         onClick={onToggle}
         aria-pressed={isActive}
+        aria-busy={isLoading}
         aria-label={`${isActive ? 'Turn off' : 'Turn on'} ${sound.name}`}
         className={cn(
           'flex flex-1 flex-col items-start gap-2 text-left transition-transform duration-200 ease-glide',
@@ -36,7 +39,11 @@ export function SoundCard({ sound, volume, isActive, onToggle, onVolumeChange, o
           {sound.emoji ?? '🎧'}
         </span>
         <span className="text-lg font-semibold text-slate-100">{sound.name}</span>
-        <span className="text-sm text-textMuted capitalize">{sound.category === 'mine' ? 'Your upload' : sound.category}</span>
+        {isLoading ? (
+          <span className="animate-pulse text-sm text-textMuted">Loading…</span>
+        ) : (
+          <span className="text-sm text-textMuted capitalize">{sound.category === 'mine' ? 'Your upload' : sound.category}</span>
+        )}
       </button>
 
       {onDelete ? (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   toUserSoundId,
   userSoundUuid,
@@ -14,6 +14,9 @@ import { deleteUserSound, fetchUserSoundBytes, fetchUserSounds, uploadUserSound 
 import { useMixerStore } from '@/store/mixer-store';
 
 export type UserSoundsStatus = 'signed-out' | 'loading' | 'ready' | 'error';
+
+const NOTHING_LOADING: ReadonlySet<string> = new Set();
+const getNothingLoading = () => NOTHING_LOADING;
 
 function toDefinition(sound: UserSound, index: number): SoundDefinition {
   return {
@@ -43,6 +46,8 @@ export function useUserSounds(engine: MixerAudioEngine) {
     null
   );
   const [reloads, setReloads] = useState(0);
+  // A long upload takes a while to download and decode after it's switched on.
+  const loadingIds = useSyncExternalStore(engine.subscribeLoading, engine.getLoadingSnapshot, getNothingLoading);
 
   useEffect(() => {
     if (sessionPending || !userId) {
@@ -73,12 +78,13 @@ export function useUserSounds(engine: MixerAudioEngine) {
 
   useEffect(() => {
     engine.setUploadedSounds(
-      definitions.map((definition) => ({
-        definition,
-        load: () => fetchUserSoundBytes(userSoundUuid(definition.id) ?? '')
+      (data?.sounds ?? []).map((sound, index) => ({
+        definition: definitions[index],
+        contentType: sound.contentType,
+        load: () => fetchUserSoundBytes(sound.id)
       }))
     );
-  }, [definitions, engine]);
+  }, [data, definitions, engine]);
 
   // Hand the list to the mixer once it is final for this session. While it
   // loads (or after an error), saved volumes for uploaded sounds stay pending.
@@ -137,6 +143,7 @@ export function useUserSounds(engine: MixerAudioEngine) {
     signedIn: Boolean(userId),
     email: session?.user?.email,
     definitions,
+    loadingIds,
     usage: data?.usage,
     upload,
     remove,

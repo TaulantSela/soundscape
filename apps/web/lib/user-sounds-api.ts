@@ -80,12 +80,20 @@ export async function inspectAudioFile(file: File) {
     throw new ApiError('Upload an MP3, M4A, AAC or WAV file.', 415);
   }
   if (file.size > MAX_USER_SOUND_BYTES) {
-    throw new ApiError(`Files can be up to ${MAX_USER_SOUND_BYTES / (1024 * 1024)} MB.`, 413);
+    const limit = `Files can be up to ${MAX_USER_SOUND_BYTES / (1024 * 1024)} MB`;
+    throw new ApiError(
+      userSoundExtension(contentType) === 'wav'
+        ? `${limit}, and WAV files are large. Save it as MP3 or M4A and upload that.`
+        : `${limit}.`,
+      413
+    );
   }
 
   let seconds: number;
   try {
-    const context = new OfflineAudioContext(1, 1, 44100);
+    // Only the duration matters here. Decoding at a low sample rate keeps a
+    // ten-minute file to about 40 MB of samples instead of over 200 MB.
+    const context = new OfflineAudioContext(1, 1, 8000);
     seconds = (await context.decodeAudioData(await file.arrayBuffer())).duration;
   } catch {
     throw new ApiError("That file couldn't be read as audio.", 422);
