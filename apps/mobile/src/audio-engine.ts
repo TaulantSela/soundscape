@@ -11,6 +11,19 @@ import { resolveSoundUri } from './sound-files';
 
 type EngineState = Pick<MixState, 'gains' | 'masterVolume' | 'isPlaying'>;
 
+/** One of the account's uploads: played from a downloaded copy of its file. */
+export interface UploadedLayer {
+  definition: SoundDefinition;
+  /** A local file URI, downloading the file the first time. */
+  resolveUri: () => Promise<string>;
+}
+
+/** Where an uploaded layer is, in seconds of its recording. */
+export interface LayerPosition {
+  position: number;
+  duration: number;
+}
+
 interface EngineCallbacks {
   /** Playback was paused or resumed from outside the app (lock screen, headphones). */
   onExternalPlayingChange: (isPlaying: boolean) => void;
@@ -30,10 +43,13 @@ const EXTERNAL_CHANGE_CONFIRM_MS = 600;
  * synchronously, so rapid slider changes can't race each other; only the
  * one-off preparation of a sound's file is asynchronous.
  */
-class MobileMixerEngine {
+export class MobileMixerEngine {
   private readonly definitions = new Map<string, SoundDefinition>();
+  private readonly uploads = new Map<string, UploadedLayer>();
   private readonly players = new Map<string, AudioPlayer>();
   private readonly preparing = new Set<string>();
+  /** Gains last applied, to spot an upload being switched on. */
+  private appliedGains: Record<string, number> = {};
   private state: EngineState = { gains: {}, masterVolume: 0, isPlaying: false };
   private anchorId: string | null = null;
   private anchorSubscription: { remove(): void } | null = null;
@@ -47,6 +63,50 @@ class MobileMixerEngine {
   ) {
     sounds.forEach((sound) => this.definitions.set(sound.id, sound));
   }
+
+  /**
+   * Replace the account's uploads (empty when signed out). Removed ones stop
+   * and release their players; new ones load when switched on.
+   */
+  setUploadedSounds(layers: UploadedLayer[]) {
+    const next = new Set(layers.map((layer) => layer.definition.id));
+    for (const id of this.uploads.keys()) {
+      if (!next.has(id)) {
+        this.uploads.delete(id);
+        this.definitions.delete(id);
+        if (this.anchorId === id) {
+          this.releaseAnchor();
+        }
+        this.players.get(id)?.remove();
+        this.players.delete(id);
+      }
+    }
+    for (const layer of layers) {
+      this.uploads.set(layer.definition.id, layer);
+      this.definitions.set(layer.definition.id, layer.definition);
+    }
+    this.apply();
+  }
+
+  /** Where an uploaded layer is, or `undefined` while it's off or still loading. */
+  readonly getPosition = (soundId: string): LayerPosition | undefined => {
+    const player = this.players.get(soundId);
+    if (!player || !this.uploads.has(soundId) || !player.isLoaded || !(player.duration > 0)) {
+      return undefined;
+    }
+    return { position: Math.min(player.currentTime, player.duration), duration: player.duration };
+  };
+
+  /** Jump an uploaded layer to `seconds` into its recording. */
+  readonly seek = (soundId: string, seconds: number) => {
+    const player = this.players.get(soundId);
+    if (!player || !this.uploads.has(soundId) || !(player.duration > 0)) {
+      return;
+    }
+    player
+      .seekTo(Math.min(Math.max(0, seconds), Math.max(0, player.duration - 0.25)))
+      .catch(() => undefined);
+  };
 
   update(state: EngineState) {
     if (state.isPlaying !== this.state.isPlaying) {
@@ -78,6 +138,8 @@ class MobileMixerEngine {
     this.definitions.forEach((_definition, soundId) => {
       const gain = gains[soundId] ?? 0;
       const player = this.players.get(soundId);
+      const wasOn = (this.appliedGains[soundId] ?? 0) > 0;
+      this.appliedGains[soundId] = player ? gain : 0;
 
       if (gain <= 0) {
         if (player?.playing) {
@@ -90,6 +152,10 @@ class MobileMixerEngine {
         return;
       }
 
+      // Uploads are recordings: switching one on plays it from the beginning.
+      if (!wasOn && this.uploads.has(soundId)) {
+        player.seekTo(0).catch(() => undefined);
+      }
       // Master volume scales every layer; expo-audio has no shared bus.
       player.volume = gain * masterVolume;
       if (isPlaying && !player.playing) {
@@ -109,8 +175,13 @@ class MobileMixerEngine {
     }
     this.preparing.add(soundId);
 
-    resolveSoundUri(definition)
+    const upload = this.uploads.get(soundId);
+    (upload ? upload.resolveUri() : resolveSoundUri(definition))
       .then((uri) => {
+        // Signed out or deleted while downloading.
+        if (upload && !this.uploads.has(soundId)) {
+          return;
+        }
         if (this.disposed || this.players.has(soundId)) {
           return;
         }
@@ -222,4 +293,6 @@ export function useMixerAudio(
   useEffect(() => {
     engine.update(mix);
   }, [engine, mix]);
+
+  return engine;
 }
