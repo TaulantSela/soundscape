@@ -10,11 +10,24 @@ export interface EngineState {
 
 interface Voice {
   source: AudioBufferSourceNode;
+  /** Fades just this source, so a seek can swap sources without a click. */
+  fade: GainNode;
+  /** The layer's volume. */
   gain: GainNode;
+  /** Context time the source started at, and the buffer offset it started from. */
+  startedAt: number;
+  offset: number;
+}
+
+/** Where an uploaded layer is, in seconds of its recording. */
+export interface LayerPosition {
+  position: number;
+  duration: number;
 }
 
 const LAYER_FADE_SECONDS = 0.2;
 const PAUSE_FADE_SECONDS = 0.12;
+const SEEK_FADE_SECONDS = 0.03;
 
 /**
  * Ramp from wherever the parameter is *now*. A bare `linearRampToValueAtTime`
@@ -35,26 +48,27 @@ const LOOP_CROSSFADE_SECONDS = 0.3;
 const RELEASE_AFTER_MS = 30_000;
 
 /**
- * Make an arbitrary recording loop without a click: the last moments are
- * faded (equal-power) into the first ones, and the returned loop end stops
- * short of them, so playback runs from the tail straight into the blended
- * head. It works in place because a long upload decodes to hundreds of MB,
- * and a shortened copy would briefly double that.
+ * Make an arbitrary recording loop without a click: its last moments are
+ * faded (equal-power) into its first ones, and the returned loop start skips
+ * those first moments on every pass after the first. So the recording plays
+ * from its real beginning, and each repeat runs from the blended tail
+ * straight on from where the blend left off. It works in place because a
+ * long upload decodes to hundreds of MB, and a copy would briefly double that.
  */
 function crossfadeLoop(buffer: AudioBuffer): number | undefined {
   const fade = Math.min(Math.floor(LOOP_CROSSFADE_SECONDS * buffer.sampleRate), Math.floor(buffer.length / 4));
   if (fade < 64) {
     return undefined;
   }
-  const length = buffer.length - fade;
+  const tail = buffer.length - fade;
   for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
     const samples = buffer.getChannelData(channel);
     for (let i = 0; i < fade; i++) {
       const position = (i / fade) * (Math.PI / 2);
-      samples[i] = samples[i] * Math.sin(position) + samples[length + i] * Math.cos(position);
+      samples[tail + i] = samples[tail + i] * Math.cos(position) + samples[i] * Math.sin(position);
     }
   }
-  return length / buffer.sampleRate;
+  return fade / buffer.sampleRate;
 }
 
 /**
@@ -118,8 +132,8 @@ export class MixerAudioEngine {
    * fraction of its samples' size, and the account quota bounds the total.
    */
   private readonly files = new Map<string, Promise<ArrayBuffer>>();
-  /** Where a crossfaded upload's loop ends; the samples after it only feed the fade. */
-  private readonly loopEnds = new WeakMap<AudioBuffer, number>();
+  /** Where a crossfaded upload's repeats start; its tail already blends into what comes before. */
+  private readonly loopStarts = new WeakMap<AudioBuffer, number>();
   private readonly releaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Last gain applied per sound, so only changed layers are touched. */
   private applied: Record<string, number> = {};
@@ -162,6 +176,43 @@ export class MixerAudioEngine {
     };
   };
 
+  /**
+   * Where an uploaded layer is playing, or `undefined` while it's off or
+   * still loading. Built-in loops have no meaningful position.
+   */
+  readonly getPosition = (soundId: string): LayerPosition | undefined => {
+    const voice = this.voices.get(soundId);
+    const context = this.context;
+    const buffer = voice?.source.buffer;
+    if (!voice || !context || !buffer || !this.uploads.has(soundId)) {
+      return undefined;
+    }
+    const { loopStart } = voice.source;
+    const duration = buffer.duration;
+    // A suspended context's clock stands still, so pausing holds the position.
+    let position = voice.offset + Math.max(0, context.currentTime - voice.startedAt);
+    if (position >= duration) {
+      position = loopStart + ((position - duration) % (duration - loopStart));
+    }
+    return { position, duration };
+  };
+
+  /** Jump an uploaded layer to `seconds` into its recording. */
+  readonly seek = (soundId: string, seconds: number) => {
+    const voice = this.voices.get(soundId);
+    const context = this.context;
+    const buffer = voice?.source.buffer;
+    if (!voice || !context || !buffer || !this.uploads.has(soundId)) {
+      return;
+    }
+    const offset = Math.min(Math.max(0, seconds), Math.max(0, buffer.duration - 0.05));
+    this.fadeOutSource(context, voice, SEEK_FADE_SECONDS);
+    const { source, fade } = this.createSource(context, buffer, voice.gain);
+    rampTo(fade.gain, 1, context, SEEK_FADE_SECONDS);
+    source.start(context.currentTime, offset);
+    Object.assign(voice, { source, fade, startedAt: context.currentTime, offset });
+  };
+
   /** Create or resume the audio context. Call from a user gesture. */
   unlock() {
     const context = this.ensureContext();
@@ -198,6 +249,7 @@ export class MixerAudioEngine {
         // Already stopped.
       }
       voice.source.disconnect();
+      voice.fade.disconnect();
       voice.gain.disconnect();
     });
     this.voices.clear();
@@ -341,17 +393,14 @@ export class MixerAudioEngine {
       gain.gain.value = 0;
       gain.connect(master);
 
-      const loopEnd = this.loopEnds.get(buffer) ?? buffer.duration;
-      const source = context.createBufferSource();
-      source.buffer = buffer;
-      source.loop = true;
-      source.loopStart = 0;
-      source.loopEnd = loopEnd;
-      source.connect(gain);
-      // Start each loop at a random point so layers never line up the same way.
-      source.start(context.currentTime, Math.random() * loopEnd);
+      const { source, fade } = this.createSource(context, buffer, gain);
+      fade.gain.value = 1;
+      // Uploads are recordings, so they play from the beginning. Built-in
+      // loops start at a random point so layers never line up the same way.
+      const offset = this.uploads.has(soundId) ? 0 : Math.random() * buffer.duration;
+      source.start(context.currentTime, offset);
 
-      this.voices.set(soundId, { source, gain });
+      this.voices.set(soundId, { source, fade, gain, startedAt: context.currentTime, offset });
       this.applied[soundId] = latest;
       rampTo(gain.gain, latest, context, LAYER_FADE_SECONDS);
     });
@@ -364,12 +413,39 @@ export class MixerAudioEngine {
     }
     this.voices.delete(soundId);
     rampTo(voice.gain.gain, 0, context, LAYER_FADE_SECONDS);
-    voice.source.onended = () => {
-      voice.source.disconnect();
-      voice.gain.disconnect();
+    const { source, fade, gain } = voice;
+    source.onended = () => {
+      source.disconnect();
+      fade.disconnect();
+      gain.disconnect();
     };
-    voice.source.stop(context.currentTime + LAYER_FADE_SECONDS + 0.05);
+    source.stop(context.currentTime + LAYER_FADE_SECONDS + 0.05);
     this.scheduleRelease(soundId);
+  }
+
+  /** A looping source for `buffer` behind its own fade, feeding `gain`. */
+  private createSource(context: AudioContext, buffer: AudioBuffer, gain: GainNode) {
+    const fade = context.createGain();
+    fade.gain.value = 0;
+    fade.connect(gain);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.loopStart = this.loopStarts.get(buffer) ?? 0;
+    source.loopEnd = buffer.duration;
+    source.connect(fade);
+    return { source, fade };
+  }
+
+  /** Fade out and stop a voice's current source, leaving its layer gain alone. */
+  private fadeOutSource(context: AudioContext, voice: Voice, seconds: number) {
+    const { source, fade } = voice;
+    rampTo(fade.gain, 0, context, seconds);
+    source.onended = () => {
+      source.disconnect();
+      fade.disconnect();
+    };
+    source.stop(context.currentTime + seconds + 0.01);
   }
 
   /**
@@ -442,9 +518,9 @@ export class MixerAudioEngine {
         extension === 'm4a' || extension === 'aac'
           ? await decodeAac(context, bytes)
           : await context.decodeAudioData(bytes);
-      const loopEnd = crossfadeLoop(buffer);
-      if (loopEnd !== undefined) {
-        this.loopEnds.set(buffer, loopEnd);
+      const loopStart = crossfadeLoop(buffer);
+      if (loopStart !== undefined) {
+        this.loopStarts.set(buffer, loopStart);
       }
       return buffer;
     }

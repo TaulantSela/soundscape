@@ -167,6 +167,8 @@ export function MixerApp({ sounds, presets, sharedMix }: MixerAppProps) {
             onUpload={userSounds.upload}
             onDelete={userSounds.remove}
             onRetry={userSounds.retry}
+            getPosition={userSounds.getPosition}
+            onSeek={userSounds.seek}
           />
         </div>
 

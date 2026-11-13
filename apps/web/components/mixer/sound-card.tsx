@@ -1,5 +1,6 @@
 'use client';
 
+import { type ReactNode } from 'react';
 import { type SoundDefinition } from '@soundscape/audio-library';
 import { Slider } from '@/components/ui/slider';
 import { cn, formatPercent } from '@/lib/utils';
@@ -14,9 +15,20 @@ interface SoundCardProps {
   onVolumeChange: (value: number) => void;
   /** Shown for the listener's own uploads. */
   onDelete?: () => void;
+  /** Position and seeking, for an upload that's on. */
+  transport?: ReactNode;
 }
 
-export function SoundCard({ sound, volume, isActive, isLoading = false, onToggle, onVolumeChange, onDelete }: SoundCardProps) {
+export function SoundCard({
+  sound,
+  volume,
+  isActive,
+  isLoading = false,
+  onToggle,
+  onVolumeChange,
+  onDelete,
+  transport
+}: SoundCardProps) {
   return (
     <div
       className={cn(
@@ -56,6 +68,8 @@ export function SoundCard({ sound, volume, isActive, isLoading = false, onToggle
           Delete
         </button>
       ) : null}
+
+      {transport ? <div className="relative z-10 mt-4">{transport}</div> : null}
 
       <div className="mt-6 flex flex-col gap-2">
         <Slider
