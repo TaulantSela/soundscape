@@ -12,7 +12,9 @@ import {
 } from '@soundscape/audio-library';
 import { Button } from '@/components/ui/button';
 import { SoundCard } from '@/components/mixer/sound-card';
+import { UploadTransport } from '@/components/mixer/upload-transport';
 import type { UserSoundsStatus } from '@/hooks/use-user-sounds';
+import type { LayerPosition } from '@/lib/mixer-audio-engine';
 import { AUDIO_FILE_ACCEPT, inspectAudioFile } from '@/lib/user-sounds-api';
 
 interface MySoundsProps {
@@ -27,6 +29,8 @@ interface MySoundsProps {
   onUpload: (file: File, name: string, onProgress: (fraction: number) => void) => Promise<unknown>;
   onDelete: (soundId: string) => Promise<void>;
   onRetry: () => void;
+  getPosition: (soundId: string) => LayerPosition | undefined;
+  onSeek: (soundId: string, seconds: number) => void;
 }
 
 const MAX_MINUTES = MAX_USER_SOUND_SECONDS / 60;
@@ -40,7 +44,20 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 }
 
-export function MySounds({ status, sounds, loadingIds, usage, volumes, onToggle, onVolumeChange, onUpload, onDelete, onRetry }: MySoundsProps) {
+export function MySounds({
+  status,
+  sounds,
+  loadingIds,
+  usage,
+  volumes,
+  onToggle,
+  onVolumeChange,
+  onUpload,
+  onDelete,
+  onRetry,
+  getPosition,
+  onSeek
+}: MySoundsProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<{ file: File; name: string } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -198,6 +215,11 @@ export function MySounds({ status, sounds, loadingIds, usage, volumes, onToggle,
               onToggle={() => onToggle(sound.id)}
               onVolumeChange={(value) => onVolumeChange(sound.id, value)}
               onDelete={() => void handleDelete(sound)}
+              transport={
+                (volumes[sound.id] ?? 0) > 0 ? (
+                  <UploadTransport soundId={sound.id} name={sound.name} getPosition={getPosition} onSeek={onSeek} />
+                ) : undefined
+              }
             />
           ))}
         </div>

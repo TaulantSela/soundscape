@@ -144,6 +144,8 @@ export function useUserSounds(engine: MixerAudioEngine) {
     email: session?.user?.email,
     definitions,
     loadingIds,
+    getPosition: engine.getPosition,
+    seek: engine.seek,
     usage: data?.usage,
     upload,
     remove,
