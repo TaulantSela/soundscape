@@ -1,37 +1,112 @@
-# Soundscape Mixer
+# 🌧️🌊🔥 Soundscape Mixer
 
-Soundscape Mixer is a cross-platform ambient audio tool that lets listeners blend layers (rain, waves, café murmur, brown noise and more) into a mix they can share with a link. The monorepo holds a Next.js web app, an Expo mobile app, an Electron desktop shell, an optional Express API, and the shared packages they all use.
+Blend ambient layers (rain, waves, café murmur, a fireplace, brown noise and
+more) into a mix for focus or sleep, then share it with a link. Soundscape
+Mixer runs in the browser, on iOS and Android, and on the desktop with tray
+controls.
 
-## Workspace layout
+**▶ [Open the mixer →](https://soundscape-web-one.vercel.app)** — no account
+needed. Switch on a few layers and press Space.
 
-- `packages/audio-library` – sound and preset definitions, mix helpers, share-link encoding, and the synthesizer that renders every sound
-- `packages/config` – environment-aware configuration helpers used by every target
-- `apps/web` – Next.js 15 web app (the main product)
-- `apps/mobile` – Expo SDK 54 / React Native app
-- `apps/desktop` – Electron shell around the web app, with tray controls
-- `apps/api` – Express + Prisma REST API (optional; no client depends on it today)
+None of the built-in sounds is a recording. Each one is synthesized from code,
+so there are no audio files to license, host or download. A shared mix is just
+a URL: nothing about it is stored on a server.
 
-## How sounds work
+## Features
 
-None of the sounds ship as audio files. Each one is synthesized from code in `packages/audio-library/src/synth`, rendered as a seamless loop (continuous textures are crossfaded at the loop point; discrete events wrap around it) and level-matched. The web app renders loops in a Web Worker and plays them with Web Audio; the mobile app renders each loop once and caches it as a WAV file.
-
-To use a recording instead, add `file: { path: '/audio/<id>.mp3', format: 'mp3' }` to the sound in `packages/audio-library/src/sounds.ts` and serve the file from `apps/web/public/audio/` (or a CDN via `NEXT_PUBLIC_ASSET_URL`). Make sure you hold the rights to any recording you add.
+- **12 synthesized sounds** in four groups: nature (rain, thunder, ocean,
+  birds, wind), urban (café, night train, city hum), home (fireplace, keyboard
+  typing) and tones (lo-fi piano, brown noise). Each has its own volume, plus
+  a master volume.
+- **6 presets**: Focus Flow, Deep Work, Cozy Night, Sleep Drift, Train Ride
+  and Reading Nook. Applying one replaces the current mix.
+- **Share links** that carry the whole mix. The web app copies the link to
+  the clipboard (or opens the share sheet on touch devices); the mobile app
+  opens the native share sheet.
+- **Your own sounds**: sign in with Google or email and password, then upload
+  MP3, M4A, AAC or WAV files and layer them with the built-in sounds. Uploads
+  are private to your account and show their position with scrubbing,
+  Restart and ±15 s.
+- **Keyboard shortcuts** on the web: Space plays and pauses, 1–9 toggle the
+  first nine sounds (by physical key, so they work on any layout).
+- **Your mix is remembered** between visits (localStorage on the web,
+  AsyncStorage on mobile). Playback always starts stopped.
+- **Background playback on mobile**: the mix keeps playing with the screen
+  locked, and the lock screen or headphones pause and resume the whole mix.
+- **Desktop tray**: Show/Hide Mixer, Play/Pause and Quit.
 
 ## Sharing mixes
 
-A shared mix travels inside the link, so sharing needs no server or database:
+A shared mix travels inside the link:
 
 ```
 /mix?s=rain-shower:60,brown-noise:35&v=80
 ```
 
-`s` lists `soundId:volumePercent` pairs and `v` is the master volume. Opening a link never overwrites the listener's own saved mix unless they choose **Keep this mix**. See `packages/audio-library/src/share.ts`.
+`s` lists `soundId:volumePercent` pairs, `v` is the master volume and an
+optional `n` names the mix. Unknown sounds, duplicates and malformed volumes
+are dropped. Opening a link never overwrites the listener's own saved mix
+unless they choose **Keep this mix**.
 
-## Prerequisites
+Uploaded sounds travel in the link as `u-<uuid>` ids, but only their owner
+can play them: everyone else hears the mix without those layers, and the
+banner says so. See `packages/audio-library/src/share.ts`.
+
+## How it works
+
+1. **Sounds** (`packages/audio-library/src/synth`). Every sound is a generator
+   rendered as a seamless 12–30 s loop: continuous textures (noise, wind,
+   waves) are crossfaded at the loop point, discrete events (drops, chirps,
+   keys, notes) wrap around it, and each loop is normalized to a target
+   loudness so the layers are level-matched.
+2. **Web** (`apps/web`, Next.js 16, Zustand, Tailwind CSS). Loops are rendered
+   in a Web Worker so the UI never stalls, then each active sound plays as a
+   looping `AudioBufferSourceNode` through its own gain, a master gain and a
+   gentle limiter.
+3. **Mobile** (`apps/mobile`, Expo SDK 54 / React Native 0.81). Each sound is
+   rendered the first time it is switched on and cached as a WAV file, then
+   played with one looping `expo-audio` player per layer.
+4. **Desktop** (`apps/desktop`, Electron). Wraps the web app: the dev server
+   in development, the production site when packaged. The tray's Play/Pause
+   reaches the page through `window.soundscapeDesktop`.
+5. **Accounts and uploads** (web API routes). Sign-in is Neon Auth (Managed
+   Better Auth), proxied through `app/api/auth` so the session cookie stays on
+   the site. Uploads are listed in Neon Postgres and stored in a private
+   Vercel Blob store. An upload takes three steps: the server checks the type
+   and size and reserves quota, the browser `PUT`s the file straight to Blob
+   with a presigned URL, and the server confirms it. Playback fetches a
+   15-minute signed URL.
+6. **Mobile sign-in** uses the website's sign-in pages as an OAuth provider
+   (authorization code with PKCE) and calls the same `/api/sounds/*` routes
+   with a bearer token kept in the Keychain/Keystore.
+7. **API** (`apps/api`, Express + Prisma, optional). Stores mixes; no client
+   depends on it today.
+
+Upload limits are shared by web and mobile (`packages/audio-library/src/user-sounds.ts`):
+up to 50 MB and 10 minutes per file, 50 sounds and 200 MB per account.
+
+To use a recording instead of a synthesized sound, add
+`file: { path: '/audio/<id>.mp3', format: 'mp3' }` to the sound in
+`packages/audio-library/src/sounds.ts` and serve the file from
+`apps/web/public/audio/` (or a CDN via `NEXT_PUBLIC_ASSET_URL`). Make sure you
+hold the rights to any recording you add.
+
+## Workspace layout
+
+- `packages/audio-library`: sound and preset definitions, mix helpers, share-link encoding, upload limits, and the synthesizer that renders every sound
+- `packages/config`: environment-aware configuration helpers used by every target
+- `apps/web`: Next.js 16 web app (the main product)
+- `apps/mobile`: Expo SDK 54 / React Native app
+- `apps/desktop`: Electron shell around the web app, with tray controls
+- `apps/api`: Express + Prisma REST API (optional; no client depends on it today)
+
+## Run locally
+
+Prerequisites:
 
 - Node.js 22.12 or newer and npm 10+
 - For the API only: PostgreSQL
-- For mobile builds: Xcode and/or Android Studio (the app uses native modules, so build it with `expo run:ios` / `expo run:android`)
+- For mobile builds: Xcode and/or Android Studio (the app uses native modules, so build it with `expo run:ios` / `expo run:android`, not Expo Go)
 
 Install all dependencies from the repository root:
 
@@ -39,9 +114,7 @@ Install all dependencies from the repository root:
 npm install
 ```
 
-## Scripts
-
-Run these from the repository root:
+Then run these from the root:
 
 | Command | What it does |
 | --- | --- |
@@ -54,12 +127,37 @@ Run these from the repository root:
 | `npm run typecheck` | Type-check every workspace |
 | `npm run lint` | Lint every workspace |
 
-Each workspace README lists its own scripts and environment variables.
+The mixer itself runs without any configuration. Accounts and uploads need a
+Neon project with Neon Auth, a private Vercel Blob store and these variables in
+`apps/web/.env.local`:
 
-## Testing
+| Variable | Used for |
+| --- | --- |
+| `DATABASE_URL` | Neon Postgres (uploaded sounds) |
+| `NEON_AUTH_BASE_URL` | Neon Auth endpoint |
+| `NEON_AUTH_COOKIE_SECRET` | Signs the session cookie (32+ random characters) |
+| `BLOB_READ_WRITE_TOKEN` | Private Vercel Blob store for uploads |
 
-Vitest covers the shared packages (mix logic, share links, synthesizer output and loop seams, config) and the API (Supertest, with Prisma mocked).
+Then create the uploads table once with
+`npm run db:migrate --workspace @soundscape/web`.
 
-## License
+Safari refuses the secure auth cookies on plain `http://localhost`, so test
+sign-in locally in Chrome or on a preview deployment. Each workspace README
+lists its own scripts and optional variables (`NEXT_PUBLIC_*` for the web,
+`EXPO_PUBLIC_*` for mobile, `JWT_*` and `FRONTEND_URL` for the API).
 
-MIT
+Vitest covers the shared packages (mix logic, share links, synthesizer output
+and loop seams, upload limits, config) and the API (Supertest, with Prisma
+mocked).
+
+## Status
+
+- **Web** is live at the link above.
+- **Mobile** isn't on the App Store or Google Play: build it yourself with
+  `npm run ios --workspace @soundscape/mobile` (or `android`).
+- **Desktop** has no published installers: `npm run dist --workspace @soundscape/desktop`
+  packages unsigned ones into `apps/desktop/release/`. Google sign-in is hidden
+  there, because Google refuses to sign in from embedded browsers; use email
+  and password instead.
+- **API**: only the health check and stored mixes work; the auth, sound and
+  preset routes return `501 Not Implemented`.
