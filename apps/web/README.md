@@ -15,7 +15,7 @@ vercel env pull apps/web/.env.local
 | `DATABASE_URL` | Neon Postgres (`user_sounds`) |
 | `NEON_AUTH_BASE_URL` | Managed Better Auth endpoint |
 | `NEON_AUTH_COOKIE_SECRET` | Signs the session-data cookie (32+ random characters, different per environment) |
-| `BLOB_READ_WRITE_TOKEN` | Private Blob store `soundscape-uploads`: signed upload and download URLs |
+| `BLOB_READ_WRITE_TOKEN` | A private Vercel Blob store: signed upload and download URLs |
 
 Local development and production currently share one database. Use throwaway accounts when testing and delete them afterwards.
 
@@ -77,7 +77,7 @@ Build the shared packages first (`npm run build:packages` at the root); `npm run
 
 The app signs in with Neon Auth's OAuth provider (authorization code with PKCE) and calls this API with the access token.
 
-- Neon setup (branch `main` of `soundscape-db`): the OAuth provider is enabled with login page `/auth/login`, consent page `/auth/consent` and the protected resource `https://soundscape-web-one.vercel.app/api`. The app is the public client "Soundscape app" (`FzpipYmjYIcdIDBZcPeUQLpbNQLMQmEF`, no secret), whose only redirect URI is `/auth/app-callback`. These live in Neon, not in this repo: change them with the Neon Console or API.
+- Neon setup (the Neon project's main branch): the OAuth provider is enabled with login page `/auth/login`, consent page `/auth/consent` and the protected resource `https://soundscape-web-one.vercel.app/api`. The app is a public OAuth client with no secret (its ID is in `apps/mobile/src/account/config.ts`), whose only redirect URI is `/auth/app-callback`. These live in Neon, not in this repo: change them with the Neon Console or API.
 - The flow:
   1. The app opens `/auth/app-authorize?<authorize parameters>` in a sign-in browser. Neon's authorize endpoint answers with JSON rather than a redirect, so this route asks it and redirects to the login page it names.
   2. The login page signs in (or finds the session) and continues; the auth client attaches the signed `oauth_query` itself. Creating an account goes through the register page with the same query.
