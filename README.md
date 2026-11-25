@@ -148,6 +148,16 @@ apps/web/.env.local` points local work at it and nothing you do locally reaches
 production data. Sign up for a test account there; production accounts don't
 exist on it.
 
+`npm run db:migrate` only runs on a database marked as a disposable dev
+database ([`apps/web/scripts/require-dev-db.mjs`](apps/web/scripts/require-dev-db.mjs)),
+so it can't migrate production from a laptop. `soundscape-dev` is marked; to
+mark a new dev database (never production), run this once against it, e.g. in
+Neon's SQL editor:
+
+```sql
+COMMENT ON DATABASE neondb IS 'soundscape:disposable';
+```
+
 Production builds apply new migrations themselves: the Vercel build runs
 [`apps/web/scripts/migrate-on-production-build.mjs`](apps/web/scripts/migrate-on-production-build.mjs)
 before `next build` on `VERCEL_ENV=production`, so a merged PR's migrations land
