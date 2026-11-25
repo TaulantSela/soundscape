@@ -4,9 +4,9 @@
 // else it does nothing.
 //
 // If a migration fails, the build fails and the current production deployment stays live.
-// Previews share the production database, and the previous version keeps serving while the build
-// runs, so keep migrations backward-compatible: add tables and columns first, and remove what the
-// old code still reads in a later release.
+// Previews use the dev database (soundscape-dev), migrated by hand with `npm run db:migrate`.
+// The previous version keeps serving while the build runs, so keep migrations backward-compatible:
+// add tables and columns first, and remove what the old code still reads in a later release.
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
