@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs"
+    "db:migrate": "node --env-file-if-exists=.env.local scripts/require-dev-db.mjs && node --env-file-if-exists=.env.local scripts/migrate.mjs"
   },
   "dependencies": {
     "@neon/auth": "^0.8.2",
