@@ -141,6 +141,13 @@ Neon project with Neon Auth, a private Vercel Blob store and these variables in
 Then create the uploads table once with
 `npm run db:migrate --workspace @soundscape/web`.
 
+Production builds apply new migrations themselves: the Vercel build runs
+[`apps/web/scripts/migrate-on-production-build.mjs`](apps/web/scripts/migrate-on-production-build.mjs)
+before `next build` on `VERCEL_ENV=production`, so a merged PR's migrations land
+with its code. A failing migration fails the build and the current version stays
+live. Keep migrations backward-compatible (add first, remove in a later
+release): the previous version keeps serving while the build runs.
+
 Safari refuses the secure auth cookies on plain `http://localhost`, so test
 sign-in locally in Chrome or on a preview deployment. Each workspace README
 lists its own scripts and optional variables (`NEXT_PUBLIC_*` for the web,
