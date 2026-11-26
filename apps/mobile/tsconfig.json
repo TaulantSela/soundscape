@@ -5,10 +5,14 @@
     "lib": ["ES2021"],
     "noEmit": true,
     "isolatedModules": true,
-    "baseUrl": "./src",
+    // Metro bundles the app, so resolve like Expo's own tsconfig.base does. TypeScript 6 (SDK 58)
+    // deprecates the shared base's node10 resolution and baseUrl.
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "customConditions": ["react-native"],
     "paths": {
-      "@/": ["./*"],
-      "@/*": ["./*"]
+      "@/": ["./src/"],
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src", "index.js"],

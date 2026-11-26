@@ -23,6 +23,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     ['expo-audio', { microphonePermission: false, recordAudioAndroid: false }],
+    // SDK 58 modules that ship config plugins; `expo install` can't add them to a dynamic config
+    'expo-asset',
+    'expo-secure-store',
+    'expo-status-bar',
+    'expo-web-browser',
     // Xcode 27 rejects the iOS 13.4 minimum some pod resource bundles still declare.
     './plugins/with-pod-resource-deployment-target',
   ],
