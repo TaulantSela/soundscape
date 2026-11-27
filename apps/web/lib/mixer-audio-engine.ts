@@ -538,7 +538,9 @@ export class MixerAudioEngine {
 
     const loop = await renderSynthLoop(soundId);
     const buffer = context.createBuffer(loop.channels.length, loop.channels[0].length, loop.sampleRate);
-    loop.channels.forEach((channel, index) => buffer.copyToChannel(channel, index));
+    // The channels are plain `new Float32Array(n)` buffers (rendered here or cloned from the worker),
+    // so they're ArrayBuffer-backed, which lib.dom's copyToChannel now requires in its type.
+    loop.channels.forEach((channel, index) => buffer.copyToChannel(channel as Float32Array<ArrayBuffer>, index));
     return buffer;
   }
 }

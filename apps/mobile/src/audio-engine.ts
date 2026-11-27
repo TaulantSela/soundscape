@@ -270,9 +270,13 @@ export function useMixerAudio(
   onExternalPlayingChange: (isPlaying: boolean) => void
 ) {
   const callbackRef = useRef(onExternalPlayingChange);
+  // Keeps the engine calling the newest callback without re-creating it on every render
+  // eslint-disable-next-line react-hooks/refs
   callbackRef.current = onExternalPlayingChange;
 
   const [engine] = useState(
+    // The engine reads callbackRef later, from playback events, never during render
+    // eslint-disable-next-line react-hooks/refs
     () =>
       new MobileMixerEngine(sounds, {
         onExternalPlayingChange: (playing) => callbackRef.current(playing),
